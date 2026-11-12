@@ -103,3 +103,31 @@
 香炉线香：**仅存于服务器内存**，每炷自放置起精确燃烧 10 分钟后由服务器删除；不写 JSON / SQLite，无倒计时 UI。Render 免费磁盘本就易失，此设计亦避免依赖磁盘。
 
 先前 Round 3–4 收录的 Wikimedia Commons CC0 造像照片（光孝寺、海幢寺、南台寺、Gary Todd 明代韦驮）仍保留在 `client/public/statues/` 与上文许可表中，本轮主场景不再使用那些照片浮雕。
+
+
+## Round 6 — 馆藏开放获取三维扫描（CC0）作金身造像（2026-11-12）
+
+本轮将部分殿内主尊与大雄宝殿胁侍，改为**克利夫兰美术馆（Cleveland Museum of Art）开放获取三维扫描**。馆方通过 Open Access 将版权放弃为 **CC0 1.0**，允许复制、修改与商业使用，无需另行许可。扫描件经减面与贴图压缩后收入 `client/public/statues/gilt/`，运行时套用本寺金身 PBR 材质（保留法线与适度的原色贴图，使五官与衣纹可读）。**不是**对商业游戏/App 模型的翻制。
+
+模型由 Artheon Museum 镜像的 Sketchfab CC0 资源直接下载（与馆方 Sketchfab 账号同一批开放扫描）。来源页以克利夫兰馆藏记录为准。
+
+| 用途 | 藏品 | 作者 / 收藏 | 许可 | 来源页 |
+|------|------|-------------|------|--------|
+| 大雄宝殿主尊 释迦牟尼佛 | *Seated Buddha*（如来坐像），日本平安时代 12 世纪，金漆木雕。仅造像部分，acc. **1973.85.a** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1973.85 |
+| 主殿胁侍（阿难位） | *Standing Bodhisattva*，朝鲜王朝 16 世纪，漆金木雕，acc. **1997.11** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1997.11 |
+| 主殿胁侍（迦叶位） | *Sun Bodhisattva (Nikkō Bosatsu)*，日本平安时代，带金彩木雕，acc. **1961.48** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1961.48 |
+| 观音殿主尊 | *Eleven-Headed Guanyin*，中国北宋末至金，彩绘洒金木雕，acc. **1981.53** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1981.53 |
+| 观音殿备选（未作默认） | *Potalaka Guanyin*，中国五代，檀香木，acc. **1965.556** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1965.556 |
+| 弥勒殿主尊 | *Buddha of the Future (Miroku Bosatsu)*，日本飞鸟时代，鎏金铜，acc. **1950.86.a** | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1950.86 |
+| 药师殿（已试、未采用） | *Buddha with Hands in Gesture of Teaching*，泰国 Mon-Dvaravati 立像青铜（acc. **1958.334**）形体过瘦且带榫杆，不适合作为殿内主尊，故药师殿仍用程序造像。扫描仍保留在 `statues/gilt/teaching-buddha.glb` 备查。 | Cleveland Museum of Art | CC0 1.0 | https://www.clevelandart.org/art/1958.334 |
+
+大厅左下角署已改为注明上述 CC0 扫描与原创《大悲咒》。本轮**仍为程序造像**的殿：药师殿、文殊殿、普贤殿、地藏殿、伽蓝殿（关公）、文昌殿、财神殿、月老殿；以及主殿四大天王与韦陀。这些尚未找到姿态与仪轨都合适、且可直接下载的 CC0/CC-BY 三维模型。
+
+未采用需登录才能下载的 Sketchfab 模型（例如韩国文化遗产厅 CC-BY 鎏金铜坐佛），也未抓取任何商业游戏或手机 App 的模型。史密森尼 Cosmic Buddha（Freer F1923.15，CC0，立像卢舍那）仍因仪轨不符主殿结跏趺坐释迦而未用作主尊。
+
+
+### 概念图（本轮未入殿）
+
+为了让主尊的「精修金身」效果可对比，本轮用 Codex 图像生成做了释迦牟尼佛正/侧/背面及观音、弥勒、药师、胁侍菩萨的**原创概念图**（浅灰棚拍背景），保存在 `docs/sources/generated/`。这些是新绘制的图像，不是对某一商业 App 或受版权保护照片的翻制，仅作预览与后续图像转三维的输入。
+
+曾尝试用免费的 Hugging Face Space `microsoft/TRELLIS.2` 把主佛正面图转成 GLB，但该 Space 的 ZeroGPU 配额已满，需要 Hugging Face token 才能继续。因此本轮**没有**把生成图做成可入殿的三维模型。主殿实际采用的是上表 CC0 馆藏扫描。若后续要再试图像转三维，需要一个 Hugging Face 账号/token，或给 fal 充值。

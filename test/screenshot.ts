@@ -9,7 +9,7 @@ import { mkdir } from "fs/promises";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, "..");
 const OUT = path.join(ROOT, "screenshots");
-const PREFIX = process.env.SCREENSHOT_PREFIX || "round5";
+const PREFIX = process.env.SCREENSHOT_PREFIX || "round6";
 const BASE = process.env.JINGXIN_URL || "http://localhost:2567";
 
 const tag = PREFIX ? `${PREFIX}-` : "";
@@ -21,6 +21,7 @@ interface Jx {
   joinHall: (id: string) => Promise<void>;
   seedIncense: (n?: number, burnerId?: string) => void;
   hallId: () => string;
+  statuesReady: () => Promise<void>;
 }
 
 async function ready(page: import("playwright").Page) {
@@ -45,7 +46,13 @@ async function joinHall(page: import("playwright").Page, id: string) {
   await page.evaluate(async (id) => {
     await (window as unknown as Jx).joinHall(id);
   }, id);
-  await page.waitForTimeout(1200);
+  await page.evaluate(async () => {
+    await Promise.race([
+      (window as unknown as Jx).statuesReady(),
+      new Promise((r) => setTimeout(r, 8000)),
+    ]);
+  });
+  await page.waitForTimeout(600);
 }
 
 async function main() {
@@ -109,6 +116,17 @@ async function main() {
   await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
   await freezeCam(page, 0, 2.0, 4.6, 0, 4.6, 16.4);
   await shot(page, "hall-qielan");
+
+  await joinHall(page, "yaoshi");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
+  await freezeCam(page, 0, 2.0, 4.6, 0, 4.6, 16.4);
+  await shot(page, "hall-yaoshi");
+
+  // Procedural halls still in this round (no suitable CC0 scan yet)
+  await joinHall(page, "wenshu");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
+  await freezeCam(page, 0, 2.0, 4.6, 0, 4.6, 16.4);
+  await shot(page, "hall-wenshu");
 
   // 5. Tools UI: wooden fish + beads (already on HUD). Zoom a bit on the game view with panels visible.
   await joinHall(page, "main");

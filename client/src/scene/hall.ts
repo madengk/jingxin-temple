@@ -11,6 +11,7 @@ import {
 } from "./deities";
 import { Monk } from "./monk";
 import { createNamePlaque } from "./statues";
+import { replaceWithGilt, giltMode, GILT_FOR } from "./giltModels";
 
 export type Obstacle = { x: number; z: number; r: number };
 
@@ -24,6 +25,7 @@ export interface HallObjects {
   floorMeshes: THREE.Mesh[];
   hallId: HallId;
   muyu: THREE.Group;
+  statuesReady: Promise<void>;
 }
 
 function mat(color: number, opts: Partial<THREE.MeshStandardMaterialParameters> = {}) {
@@ -317,6 +319,7 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   return {
     group, obstacles, cushions: null, cushionMats: new Float32Array(0),
     burners, doors, floorMeshes: [court, path], hallId: "courtyard", muyu: dummyMuyu(),
+    statuesReady: Promise.resolve(),
   };
 }
 
@@ -470,6 +473,12 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
   deity.position.set(0, lotusTop, daisZ);
   group.add(deity);
   seatFlush(deity, lotusTop);
+  const giltJobs: Promise<unknown>[] = [];
+  const mode = giltMode();
+  if (mode !== "off") {
+    const gid = GILT_FOR[def.kind];
+    if (gid) giltJobs.push(replaceWithGilt(group, deity, gid, deityH, lotusTop));
+  }
   // name plaque on the 须弥座 front, below the figure — visible
   const plaque = createNamePlaque(def.deity, def.deityTitle, { height: main ? 1.75 : 1.5, width: main ? 0.7 : 0.6 });
   plaque.scale.setScalar(main ? 1.05 : 0.9);
@@ -490,9 +499,14 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
       group.add(lot);
       const fig = standingBodhisattva(kind, 4.35);
       fig.rotation.y = Math.PI;
-      fig.position.set(x, sitY * 0.55 + (lot.userData.topY as number), daisZ - 0.4);
+      const attY = sitY * 0.55 + (lot.userData.topY as number);
+      fig.position.set(x, attY, daisZ - 0.4);
       group.add(fig);
-      seatFlush(fig, sitY * 0.55 + (lot.userData.topY as number));
+      seatFlush(fig, attY);
+      if (mode === "on" || mode === "gen") {
+        const gid = GILT_FOR[kind];
+        if (gid) giltJobs.push(replaceWithGilt(group, fig, gid, 4.35, attY));
+      }
       obstacles.push({ x, z: daisZ - 0.4, r: 1.3 });
     }
     // Four heavenly kings, smaller, flanking the nave
@@ -567,6 +581,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
     floorMeshes: [floor],
     hallId: def.id,
     muyu: dummyMuyu(),
+    statuesReady: Promise.all(giltJobs).then(() => undefined),
   };
 }
 

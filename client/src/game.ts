@@ -170,6 +170,7 @@ export class Game {
 
   private unloadHall() {
     if (!this.hall) return;
+    this.hall.group.userData.tornDown = true;
     this.scene.remove(this.hall.group);
     this.hall.group.traverse((o) => {
       const m = o as THREE.Mesh;
@@ -644,6 +645,7 @@ export class Game {
       joinHall: (id: string) => Promise<void>;
       seedIncense: (n?: number, burnerId?: string) => void;
       hallId: () => string;
+      statuesReady: () => Promise<void>;
     };
     w.freezeCam = (x, y, z, lx, ly, lz) => {
       this.camFrozen = { x, y, z, lx, ly, lz };
@@ -672,6 +674,7 @@ export class Game {
       this.room?.send("debug_seed_incense", { count: n, burnerId });
     };
     w.hallId = () => this.hallId;
+    w.statuesReady = () => this.hall?.statuesReady ?? Promise.resolve();
   }
 }
 
