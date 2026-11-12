@@ -1,0 +1,10 @@
+node_modules/
+client/dist/
+logs/
+*.log
+*.pid
+.DS_Store
+.env
+.env.*
+!.env.example
+cloudflared

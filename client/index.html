@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="theme-color" content="#1a100c" />
+    <title>静心寺</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/src/style.css" />
+  </head>
+  <body>
+    <div id="login">
+      <div class="login-veil"></div>
+      <div class="login-card">
+        <div class="temple-mark" aria-hidden="true">❀</div>
+        <h1>静心寺</h1>
+        <p class="subtitle">一片清净地</p>
+        <label class="sr-only" for="name-input">法号</label>
+        <input id="name-input" type="text" maxlength="12" placeholder="请取法号（二字至十二字）" autocomplete="off" spellcheck="false" />
+        <p id="login-err" class="error" hidden></p>
+        <button id="enter-btn" type="button">入 寺</button>
+        <p class="hint">法号在线唯一，入寺后保存在此装置。寺内不可言谈，唯余钟磬木鱼。</p>
+      </div>
+    </div>
+
+    <div id="game" hidden>
+      <div id="canvas-wrap">
+        <canvas id="scene"></canvas>
+        <div id="labels"></div>
+      </div>
+
+      <div id="hud">
+        <div id="top-left">
+          <div id="my-name"></div>
+          <div id="online">在线 0</div>
+        </div>
+        <div id="top-right">
+          <button id="mute-btn" type="button" title="静音" aria-label="静音">♪</button>
+          <input id="vol-slider" type="range" min="0" max="100" value="70" title="音量" aria-label="音量" />
+        </div>
+
+        <div id="toast" hidden></div>
+        <div id="near-hint" hidden></div>
+
+        <div id="beads-panel">
+          <canvas id="beads-canvas" width="280" height="280"></canvas>
+          <div id="bead-count">0 / 108</div>
+          <div id="bead-caption">佛珠 · 轻点或滑动</div>
+        </div>
+
+        <div id="actions">
+          <button id="btn-incense" type="button" disabled>上香</button>
+          <button id="btn-sit" type="button" disabled>打坐</button>
+          <button id="btn-muyu" type="button">木鱼</button>
+        </div>
+
+        <div id="joystick" class="touch-only">
+          <div id="joy-base"><div id="joy-knob"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

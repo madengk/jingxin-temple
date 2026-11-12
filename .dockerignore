@@ -1,0 +1,16 @@
+node_modules
+client/dist
+.git
+.gitignore
+logs
+*.log
+*.pid
+cloudflared
+screenshots
+test
+docs
+README.md
+state.md
+.cursor
+.env
+.env.*

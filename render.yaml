@@ -1,0 +1,19 @@
+# Render Blueprint — free Web Service with WebSockets.
+# After the repo is on GitHub: Render Dashboard → New → Blueprint → this repo.
+# Official free-plan docs (2026): https://render.com/docs/free
+# Free instances spin down after 15 minutes with no HTTP or WebSocket traffic;
+# the next visitor waits about one minute for a cold start.
+services:
+  - type: web
+    name: jingxin-temple
+    runtime: node
+    plan: free
+    region: singapore
+    buildCommand: npm ci --include=dev && npm run build
+    startCommand: npm start
+    healthCheckPath: /health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: NODE_VERSION
+        value: "22"
