@@ -3,6 +3,7 @@ import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { Client, Room } from "colyseus.js";
 import { Monk } from "./scene/monk";
 import { buildHall, resolveMove, setCushionOccupied, type HallObjects } from "./scene/hall";
+import { preloadCutouts } from "./scene/cutouts";
 import { SmokeSystem, makeNametag } from "./scene/fx";
 import { Controls } from "./controls";
 import { TempleAudio } from "./audio";
@@ -117,7 +118,8 @@ export class Game {
       await document.fonts.load('bold 96px "Noto Serif SC"');
       await document.fonts.load('bold 96px "Noto Serif CJK SC"');
     } catch { /* system fallback is fine */ }
-    this.setupScene();
+    const cutouts = await preloadCutouts();
+    this.setupScene(cutouts);
     this.bindRoom();
     this.running = true;
     this.loop();
@@ -151,8 +153,8 @@ export class Game {
     };
   }
 
-  private setupScene() {
-    this.hall = buildHall(this.scene);
+  private setupScene(cutouts?: Awaited<ReturnType<typeof preloadCutouts>>) {
+    this.hall = buildHall(this.scene, cutouts);
     this.scene.add(this.smoke.points);
 
     const hemi = new THREE.HemisphereLight(0xffe0c0, 0x4a3020, 0.85);

@@ -1,6 +1,6 @@
 /**
  * Headless Chromium screenshots of 静心寺.
- * SCREENSHOT_PREFIX=round2 writes screenshots/round2-*.png
+ * SCREENSHOT_PREFIX=round3 writes screenshots/round3-*.png
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -94,23 +94,23 @@ async function main() {
 
   // Close plaques: frozen camera, monk parked out of frame
   // 释迦牟尼佛 / 如来佛祖 — seated on dais at (0, 21.6), plaque in front
-  await freezeCam(page, 0, 2.35, 17.4, 0, 1.4, 21.2);
+  await freezeCam(page, 0, 3.15, 12.2, 0, 2.85, 20.6);
   await shot(page, "buddha-plaque");
 
   // Eastern kings at x=−13, face +X (inward). Camera in the aisle looking west.
-  await freezeCam(page, -9.4, 2.0, 8.0, -13.0, 1.2, 8.0);
+  await freezeCam(page, -6.6, 2.55, 8.0, -13.0, 2.45, 8.0);
   await shot(page, "king-east-dhritarashtra");
-  await freezeCam(page, -9.4, 2.0, 16.0, -13.0, 1.2, 16.0);
+  await freezeCam(page, -5.6, 2.7, 18.4, -13.0, 2.55, 16.0);
   await shot(page, "king-east-virudhaka");
 
   // Western kings at x=+13, face −X (inward).
-  await freezeCam(page, 9.4, 2.0, 8.0, 13.0, 1.2, 8.0);
+  await freezeCam(page, 6.6, 2.55, 8.0, 13.0, 2.45, 8.0);
   await shot(page, "king-west-virupaksha");
-  await freezeCam(page, 9.4, 2.0, 16.0, 13.0, 1.2, 16.0);
+  await freezeCam(page, 5.6, 2.7, 18.4, 13.0, 2.55, 16.0);
   await shot(page, "king-west-vaishravana");
 
   // 韦陀 at (−3.6, 3.2), plaque faces −Z (the entrance, south)
-  await freezeCam(page, -3.6, 1.85, 0.65, -3.6, 1.15, 2.35);
+  await freezeCam(page, -2.2, 2.2, -1.5, -3.6, 2.05, 3.2);
   await shot(page, "weituo");
 
   // Incense + a turned-facing shot (camera follows behind the monk)

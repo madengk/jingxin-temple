@@ -1,6 +1,10 @@
 import * as THREE from "three";
 import { OTHER_HALLS, allCushionPositions, INCENSE_BURNER, CUSHION_RADIUS } from "../../../server/src/shared";
-import { createBuddha, createHeavenlyKing, createWeituo } from "./statues";
+import {
+  createBuddhaCutout, createKingCutout, createWeituoCutout,
+  type CutoutId,
+} from "./cutouts";
+import type { Texture } from "three";
 
 export type Obstacle = { x: number; z: number; r: number };
 
@@ -101,7 +105,7 @@ function plaqueTex(title: string, sub = "即将开放"): THREE.CanvasTexture {
   return t;
 }
 
-export function buildHall(scene: THREE.Scene): HallObjects {
+export function buildHall(scene: THREE.Scene, cutouts?: Map<CutoutId, Texture>): HallObjects {
   const group = new THREE.Group();
   const obstacles: Obstacle[] = [];
   const wood = mat(0x6a4a32, { map: woodTex(), roughness: 0.75 });
@@ -248,10 +252,10 @@ export function buildHall(scene: THREE.Scene): HallObjects {
   group.add(M(new THREE.BoxGeometry(4, 0.35, 1.1), verm, 0, 0.2, 18.0));
   obstacles.push({ x: 0, z: 21.8, r: 4.2 });
 
-  // statues
-  const buddha = createBuddha();
+  // statues — CC0 photo cutouts when loaded, procedural geometry as fallback
+  const buddha = createBuddhaCutout(cutouts?.get("buddha"));
   group.add(buddha);
-  obstacles.push({ x: 0, z: 21.6, r: 2.6 });
+  obstacles.push({ x: 0, z: 21.6, r: 2.8 });
 
   // When facing the Buddha (looking +Z), Three.js lookAt puts world −X on
   // screen-right. Worshippers facing north have east on their right, so the
@@ -262,17 +266,18 @@ export function buildHall(scene: THREE.Scene): HallObjects {
     { i: 2, x: 13.0, z: 8, rot: Math.PI / 2 },    // 西方广目天王 · 龙/蛇
     { i: 3, x: 13.0, z: 16, rot: Math.PI / 2 },   // 北方多闻天王 · 宝伞
   ];
+  const kingTex: CutoutId[] = ["king-east", "king-south", "king-west", "king-north"];
   for (const k of kingPlaces) {
-    const kg = createHeavenlyKing(k.i);
+    const kg = createKingCutout(k.i, cutouts?.get(kingTex[k.i]));
     kg.position.set(k.x, 0, k.z);
     kg.rotation.y = k.rot;
     group.add(kg);
-    obstacles.push({ x: k.x, z: k.z, r: 1.1 });
+    obstacles.push({ x: k.x, z: k.z, r: 1.35 });
   }
 
-  const weituo = createWeituo();
+  const weituo = createWeituoCutout(cutouts?.get("weituo"));
   group.add(weituo);
-  obstacles.push({ x: -3.6, z: 3.2, r: 1.0 });
+  obstacles.push({ x: -3.6, z: 3.2, r: 1.15 });
 
   // —— Incense burner ——
   const burner = createBurner();
