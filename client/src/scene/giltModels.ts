@@ -27,7 +27,7 @@ export interface GiltEntry {
   title: string;
   author: string;
   accession: string;
-  license: "CC0 1.0";
+  license: "CC0 1.0" | "generated-original";
   sourcePage: string;
   download: string;
   sketchfab: string;
@@ -121,20 +121,35 @@ export const GILT_FOR: Partial<Record<DeityKind | "ananda" | "kasyapa", GiltId>>
   mile: "miroku",
 };
 
-export function giltMode(): "on" | "off" | "gen" {
-  if (typeof location === "undefined") return "on";
+/** Default (round 7): fal-generated gilt Shakyamuni for the main hall.
+ *  `?gilt=scan` keeps the Cleveland CC0 museum scan. `?gilt=off` is procedural. */
+export function giltMode(): "fal" | "scan" | "off" {
+  if (typeof location === "undefined") return "fal";
   const v = new URLSearchParams(location.search).get("gilt");
   if (v === "off" || v === "proc" || v === "0") return "off";
-  if (v === "gen" || v === "generated") return "gen";
-  return "on";
+  if (v === "scan" || v === "museum") return "scan";
+  if (v === "gen" || v === "generated" || v === "fal" || v === "on" || !v) return "fal";
+  return "fal";
 }
+
+/** Fal image-to-3D Shakyamuni (Hunyuan 3D Pro, from original concept images). */
+export const FAL_SHAKYAMUNI = {
+  id: "shakyamuni" as GiltId,
+  url: "/statues/fal/shakyamuni.glb",
+  keepTexture: true,
+  sink: 0.02,
+  title: "释迦牟尼佛坐像（原创概念图经 fal Hunyuan 3D Pro 转成三维，保留金身贴图）",
+  author: "静心寺原创概念图 + fal.ai Hunyuan 3D v3.1 Pro",
+  license: "generated-original" as const,
+};
 
 const loader = new GLTFLoader();
 const cache = new Map<string, Promise<THREE.Group>>();
 
-function applyGiltMaterial(root: THREE.Object3D) {
-  // Photogrammetry albedo is often darkened lacquer or bronze and would
+function applyGiltMaterial(root: THREE.Object3D, keepTexture = false) {
+  // Museum photogrammetry albedo is often darkened lacquer or bronze and would
   // muddy the 金身. Keep carved normal maps; colour is the temple gold PBR.
+  // Fal models already have a gilt albedo + PBR maps — keep those.
   const template = goldMat(0xf0d078, { metalness: 0.9, roughness: 0.24, envMapIntensity: 1.4 });
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -147,11 +162,21 @@ function applyGiltMaterial(root: THREE.Object3D) {
         g.normalMap = src.normalMap;
         g.normalScale = src.normalScale?.clone?.() ?? new THREE.Vector2(1.15, 1.15);
       }
-      g.map = null;
-      g.color.set(0xf0d078);
-      g.metalness = 0.9;
-      g.roughness = 0.24;
-      g.envMapIntensity = 1.4;
+      if (keepTexture && src?.map) {
+        g.map = src.map;
+        g.color.set(0xffffff);
+        if (src.metalnessMap) g.metalnessMap = src.metalnessMap;
+        if (src.roughnessMap) g.roughnessMap = src.roughnessMap;
+        g.metalness = src.metalness ?? 0.9;
+        g.roughness = src.roughness ?? 0.35;
+        g.envMapIntensity = 1.25;
+      } else {
+        g.map = null;
+        g.color.set(0xf0d078);
+        g.metalness = 0.9;
+        g.roughness = 0.24;
+        g.envMapIntensity = 1.4;
+      }
       g.needsUpdate = true;
       return g;
     });
@@ -161,17 +186,25 @@ function applyGiltMaterial(root: THREE.Object3D) {
   });
 }
 
-export function loadGiltModel(id: GiltId, height: number): Promise<THREE.Group> {
+export function loadGiltModel(
+  id: GiltId,
+  height: number,
+  useFal = false,
+): Promise<THREE.Group> {
   const entry = GILT_CATALOG[id];
-  const key = entry.id;
+  const fal = useFal && id === "shakyamuni";
+  const key = fal ? "fal:shakyamuni" : entry.id;
+  const url = fal ? FAL_SHAKYAMUNI.url : `/statues/gilt/${entry.id}.glb`;
+  const yaw = fal ? 0 : (entry.yaw ?? 0);
+  const heightScale = entry.heightScale ?? 1;
   let pending = cache.get(key);
   if (!pending) {
     pending = new Promise((resolve, reject) => {
       loader.load(
-        `/statues/gilt/${entry.id}.glb`,
+        url,
         (gltf) => {
           const src = gltf.scene;
-          applyGiltMaterial(src);
+          applyGiltMaterial(src, fal && FAL_SHAKYAMUNI.keepTexture);
           cache.set(key, Promise.resolve(src));
           resolve(src);
         },
@@ -192,11 +225,12 @@ export function loadGiltModel(id: GiltId, height: number): Promise<THREE.Group> 
           : (mesh.material as THREE.Material).clone();
       }
     });
-    const scale = height * (entry.heightScale ?? 1);
+    const scale = height * heightScale;
     inst.scale.setScalar(scale);
-    inst.rotation.y = entry.yaw ?? 0;
+    inst.rotation.y = yaw;
     g.add(inst);
     g.userData.giltId = id;
+    g.userData.fal = fal;
     return g;
   });
 }
@@ -223,12 +257,22 @@ export async function replaceWithGilt(
     // still ok if parent is the hall group already in a scene; check userData
   }
   if (parent.userData.tornDown) return null;
+  const useFal = giltMode() === "fal" && id === "shakyamuni";
   let fig: THREE.Group;
   try {
-    fig = await loadGiltModel(id, height);
+    fig = await loadGiltModel(id, height, useFal);
   } catch (err) {
-    console.warn("gilt model failed", id, err);
-    return null;
+    console.warn("gilt model failed", id, err, "fal", useFal);
+    if (useFal) {
+      try {
+        fig = await loadGiltModel(id, height, false);
+      } catch (err2) {
+        console.warn("gilt museum fallback failed", id, err2);
+        return null;
+      }
+    } else {
+      return null;
+    }
   }
   if (parent.userData.tornDown || !current.parent) {
     disposeFigure(fig);
@@ -237,7 +281,7 @@ export async function replaceWithGilt(
   fig.position.copy(current.position);
   fig.rotation.y = yaw;
   parent.add(fig);
-  const sink = (GILT_CATALOG[id].sink ?? 0) * height;
+  const sink = (useFal ? FAL_SHAKYAMUNI.sink : (GILT_CATALOG[id].sink ?? 0)) * height;
   seatFlush(fig, surfaceY - sink);
   parent.remove(current);
   disposeFigure(current);

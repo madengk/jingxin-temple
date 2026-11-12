@@ -503,7 +503,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
       fig.position.set(x, attY, daisZ - 0.4);
       group.add(fig);
       seatFlush(fig, attY);
-      if (mode === "on" || mode === "gen") {
+      if (mode !== "off") {
         const gid = GILT_FOR[kind];
         if (gid) giltJobs.push(replaceWithGilt(group, fig, gid, 4.35, attY));
       }

@@ -131,3 +131,19 @@
 为了让主尊的「精修金身」效果可对比，本轮用 Codex 图像生成做了释迦牟尼佛正/侧/背面及观音、弥勒、药师、胁侍菩萨的**原创概念图**（浅灰棚拍背景），保存在 `docs/sources/generated/`。这些是新绘制的图像，不是对某一商业 App 或受版权保护照片的翻制，仅作预览与后续图像转三维的输入。
 
 曾尝试用免费的 Hugging Face Space `microsoft/TRELLIS.2` 把主佛正面图转成 GLB，但该 Space 的 ZeroGPU 配额已满，需要 Hugging Face token 才能继续。因此本轮**没有**把生成图做成可入殿的三维模型。主殿实际采用的是上表 CC0 馆藏扫描。若后续要再试图像转三维，需要一个 Hugging Face 账号/token，或给 fal 充值。
+
+
+## Round 7 — fal 图像转三维试做主尊（未并入 main）
+
+本轮用 Henry 充值后的 fal 账户，把 Round 6 的原创释迦牟尼佛概念图（`docs/sources/generated/shakyamuni-front.png` 及侧/背面）转成三维模型，放进大雄宝殿主尊的须弥座与莲台。概念图为项目原创，不是对商业 App 模型的翻制。
+
+试了两个端点（各一次，不再加试）：
+
+| 端点 | 设置 | 标价（fal 模型页） | 请求 ID | 压缩后体积 |
+|------|------|-------------------|---------|-----------|
+| `fal-ai/hunyuan-3d/v3.1/pro/image-to-3d` | 正/侧/背多视图 + PBR，face_count=80000 | 基础 $0.375 + PBR $0.15 + 多视图 $0.15 + 自定义面数 $0.15 ≈ **$0.825** | `01a1cf57-0204-7ac0-92ac-f04bbb1169bc` | `client/public/statues/fal/hunyuan-shakyamuni.glb`（约 1.59 MB） |
+| `fal-ai/trellis-2` | resolution=1024，texture_size=1024，decimation_target=50000 | 1024p **$0.30** / 次 | `01a1cf57-0706-7762-988d-c699f3d0649c` | `client/public/statues/fal/trellis2-shakyamuni.glb`（约 2.06 MB） |
+
+入殿默认采用 **Hunyuan 3D Pro**（衣纹、背光褶、螺髻与禅定印都更完整），复制为 `client/public/statues/fal/shakyamuni.glb`，并保留其金身反照率与 PBR 贴图（不再套用纯色金身材质）。馆藏扫描仍可通过 `?gilt=scan` 对照。原始未压缩 GLB 不进 Git（见 `.gitignore`）。
+
+本轮代码在分支 `round7-fal`，**未推送 main，也未要求 Render 部署**。

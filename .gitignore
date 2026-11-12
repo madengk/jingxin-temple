@@ -9,3 +9,6 @@ logs/
 !.env.example
 cloudflared
 *.wav
+
+# raw fal image-to-3D dumps (tens of MB); keep compressed public copies
+docs/sources/fal/*-raw.glb
