@@ -170,3 +170,15 @@
 | 宣化上人相关 CC-BY-SA 音频（Internet Archive） | 例如 https://archive.org/details/Shurangama_Mantra_000_Lines_001-9_Refuge_Buddhism | 许可可用，但是《楞严咒》讲解/唱诵，**不是**《大悲咒》 |
 
 若之后获得一首许可明确（CC0 / CC-BY / CC-BY-SA 或公有领域）的汉传《大悲咒》唱诵，或权利人书面授权，即可替换该音轨并更新本页与界面致谢。
+
+
+## Round 10 — 玩家小和尚改为 fal Hunyuan 3D Pro（未并入 main）
+
+用造型四概念图 `docs/sources/generated/monk-option-4.png`，以及 Codex 按同一角色生成的打坐正面/侧面/背面图（`monk-seated-front.png` 等），经 `fal-ai/hunyuan-3d/v3.1/pro/image-to-3d`（PBR，face_count=80000）转成两套玩家模型。概念图与打坐图均为项目原创。
+
+| 模型 | 视图 | 标价（同 Round 7 价目） | 请求 ID | 压缩后体积 |
+|------|------|-------------------------|---------|-----------|
+| 站立/行走 | 单张正面概念图 + PBR + face_count=80000 | 基础 $0.375 + PBR $0.15 + 自定义面数 $0.15 ≈ **$0.675** | `01a1cff0-5a8a-79d1-ae72-3a907b9ce06a` | `client/public/statues/fal/monk-stand.glb`（约 1.06 MB） |
+| 打坐 | 正/侧/背多视图 + PBR + face_count=80000 | 基础 $0.375 + PBR $0.15 + 多视图 $0.15 + 自定义面数 $0.15 ≈ **$0.825** | `01a1cff3-9a62-7573-95db-97498c92b194` | `client/public/statues/fal/monk-sit.glb`（约 1.07 MB） |
+
+两套合计约 **$1.50**，均一次成功、未重试。原始未压缩 GLB 不进 Git。玩家之间 clone 共用几何与材质。行走为起伏/摆动/微前倾，无骨骼；打坐时切换打坐网格。

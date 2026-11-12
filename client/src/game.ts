@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { Client, Room } from "colyseus.js";
-import { Monk } from "./scene/monk";
+import { Monk, preloadMonks } from "./scene/monk";
 import { buildCourtyard, buildInterior, resolveMove, setCushionOccupied, type HallObjects } from "./scene/hall";
 import { IncenseField } from "./scene/incenseViz";
 import { makeNametag } from "./scene/fx";
@@ -24,6 +24,7 @@ export function serverUrl(): string {
 interface Remote {
   monk: Monk;
   group: THREE.Group;
+  tag: CSS2DObject;
   tx: number; tz: number; trot: number;
   sitting: boolean; moving: boolean;
 }
@@ -48,6 +49,7 @@ export class Game {
   private muyuPanel: MuyuPanel;
   private beads: BeadsPanel;
   private localMonk: Monk | null = null;
+  private localTag: CSS2DObject | null = null;
   private localGroup = new THREE.Group();
   private remotes = new Map<string, Remote>();
   private sessionId = "";
@@ -104,6 +106,7 @@ export class Game {
     this.resize();
     this.bindInput();
     this.installHooks();
+    void preloadMonks();
   }
 
   async connect(name: string): Promise<void> {
@@ -263,7 +266,8 @@ export class Game {
         }
         this.localMonk = new Monk(p.look);
         this.localGroup.add(this.localMonk.group);
-        this.localGroup.add(makeNametag(p.name, true));
+        this.localTag = makeNametag(p.name, true);
+        this.localGroup.add(this.localTag);
         this.localGroup.position.set(p.x, 0, p.z);
         this.localGroup.rotation.y = p.rotY;
         return;
@@ -271,12 +275,13 @@ export class Game {
       if (this.remotes.has(id)) return;
       const monk = new Monk(p.look);
       const group = new THREE.Group();
-      group.add(monk.group, makeNametag(p.name, false));
+      const tag = makeNametag(p.name, false);
+      group.add(monk.group, tag);
       group.position.set(p.x, 0, p.z);
       group.rotation.y = p.rotY;
       this.scene.add(group);
       this.remotes.set(id, {
-        monk, group, tx: p.x, tz: p.z, trot: p.rotY,
+        monk, group, tag, tx: p.x, tz: p.z, trot: p.rotY,
         sitting: p.sitting, moving: false,
       });
     };
@@ -539,6 +544,7 @@ export class Game {
       }
     }
     this.localMonk.update(dt, moving, this.sitting);
+    if (this.localTag) this.localTag.position.y = this.localMonk.crownY();
 
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / 15 && this.room && !this.leaving) {
@@ -560,6 +566,7 @@ export class Game {
       const dist = Math.hypot(r.tx - r.group.position.x, r.tz - r.group.position.z);
       r.moving = dist > 0.04 && !r.sitting;
       r.monk.update(dt, r.moving, r.sitting);
+      r.tag.position.y = r.monk.crownY();
     });
   }
 
