@@ -252,13 +252,20 @@ export class Game {
     const addPlayer = (p: PlayerView, id: string) => {
       if (id === this.sessionId) {
         this.myLook = p.look;
+        this.sitting = p.sitting;
+        this.audio.setSitting(this.sitting);
+        // Colyseus may fire onAdd for players already visited by forEach;
+        // never attach a second local mesh.
+        if (this.localMonk) {
+          this.localGroup.position.set(p.x, 0, p.z);
+          this.localGroup.rotation.y = p.rotY;
+          return;
+        }
         this.localMonk = new Monk(p.look);
         this.localGroup.add(this.localMonk.group);
         this.localGroup.add(makeNametag(p.name, true));
         this.localGroup.position.set(p.x, 0, p.z);
         this.localGroup.rotation.y = p.rotY;
-        this.sitting = p.sitting;
-        this.audio.setSitting(this.sitting);
         return;
       }
       if (this.remotes.has(id)) return;
@@ -646,6 +653,9 @@ export class Game {
       seedIncense: (n?: number, burnerId?: string) => void;
       hallId: () => string;
       statuesReady: () => Promise<void>;
+      setAnim: (opts: { moving?: boolean | null; sitting?: boolean | null; phase?: number | null }) => void;
+      sitOnCushion: (id?: number) => void;
+      playerPose: () => { x: number; y: number; z: number; rotY: number; headY: number };
     };
     w.freezeCam = (x, y, z, lx, ly, lz) => {
       this.camFrozen = { x, y, z, lx, ly, lz };
@@ -675,6 +685,37 @@ export class Game {
     };
     w.hallId = () => this.hallId;
     w.statuesReady = () => this.hall?.statuesReady ?? Promise.resolve();
+    w.setAnim = (opts) => {
+      if (opts.sitting !== undefined && opts.sitting !== null) {
+        this.sitting = opts.sitting;
+        this.audio.setSitting(opts.sitting);
+      }
+      if (!this.localMonk) return;
+      this.localMonk.debugMoving = opts.moving === undefined ? this.localMonk.debugMoving : opts.moving;
+      this.localMonk.debugSitting = opts.sitting === undefined ? this.localMonk.debugSitting : opts.sitting;
+      if (opts.phase !== undefined) this.localMonk.debugPhase = opts.phase;
+    };
+    w.sitOnCushion = (id = 25) => {
+      const pos = cushionPosition(id, this.hallId);
+      this.localGroup.position.set(pos.x, 0, pos.z);
+      this.localGroup.rotation.y = 0;
+      this.room?.send("move", { x: pos.x, z: pos.z, rotY: 0 });
+      this.room?.send("sit", { cushionId: id });
+      this.sitting = true;
+      this.audio.setSitting(true);
+      if (this.localMonk) {
+        this.localMonk.debugSitting = true;
+        this.localMonk.debugMoving = false;
+        this.localMonk.debugPhase = 0;
+      }
+    };
+    w.playerPose = () => ({
+      x: this.localGroup.position.x,
+      y: this.localGroup.position.y,
+      z: this.localGroup.position.z,
+      rotY: this.localGroup.rotation.y,
+      headY: this.localMonk ? this.localMonk.headWorldY() : 1.3,
+    });
   }
 }
 

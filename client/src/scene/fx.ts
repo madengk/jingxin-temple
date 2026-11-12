@@ -135,6 +135,6 @@ export function makeNametag(name: string, isMe: boolean): CSS2DObject {
   el.className = "nametag" + (isMe ? " me" : "");
   el.textContent = name;
   const obj = new CSS2DObject(el);
-  obj.position.set(0, 1.32, 0);
+  obj.position.set(0, 1.38, 0);
   return obj;
 }
