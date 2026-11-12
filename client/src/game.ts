@@ -73,6 +73,9 @@ export class Game {
   private leaving = false;
   private doorCooldown = 0;
   private hallId: HallId = "courtyard";
+  private hallCache = new Map<HallId, HallObjects>();
+  private warming: HallId | null = null;
+  private enterMarks: Record<string, number> = {};
   private sun!: THREE.DirectionalLight;
   private spot!: THREE.SpotLight;
   private fill!: THREE.DirectionalLight;
@@ -141,58 +144,141 @@ export class Game {
     void joy;
   }
 
+  private hallIdFromRoom(roomName: string): HallId {
+    if (roomName === "courtyard") return "courtyard";
+    if (roomName === "main_hall") return "main";
+    return hallByRoom(roomName)?.id ?? "courtyard";
+  }
+
+  private markEnter(key: string, t = performance.now()) {
+    this.enterMarks[key] = Math.round(t);
+  }
+
+  /** Swap the visible hall immediately. Cached scenes are reused as-is. */
+  private showHall(id: HallId, spawn?: { x: number; z: number; rotY: number }) {
+    if (this.hall && this.hall.group.parent && this.hall.hallId !== id) {
+      this.scene.remove(this.hall.group);
+    }
+    this.hallId = id;
+    this.hall = this.getOrBuildHall(id);
+    this.hall.group.visible = true;
+    if (!this.hall.group.parent) this.scene.add(this.hall.group);
+    this.tuneLights();
+    if (spawn) {
+      this.localGroup.position.set(spawn.x, 0, spawn.z);
+      this.localGroup.rotation.y = spawn.rotY;
+      this.controls.dest = null;
+    }
+  }
+
+  private getOrBuildHall(id: HallId): HallObjects {
+    const cached = this.hallCache.get(id);
+    if (cached) return cached;
+    const t0 = performance.now();
+    const hall = id === "courtyard"
+      ? buildCourtyard(this.scene)
+      : buildInterior(this.scene, hallById(id) ?? MAIN_HALL);
+    // Builders add the group; callers decide whether it stays visible.
+    this.hallCache.set(id, hall);
+    this.markEnter(`buildMs:${id}`, performance.now() - t0);
+    void this.compileHall(hall);
+    return hall;
+  }
+
+  private async compileHall(hall: HallObjects) {
+    const orphan = !hall.group.parent;
+    try {
+      if (orphan) {
+        hall.group.visible = false;
+        this.scene.add(hall.group);
+      }
+      const r = this.renderer as THREE.WebGLRenderer & {
+        compileAsync?: (s: THREE.Object3D, c: THREE.Camera) => Promise<void>;
+      };
+      if (r.compileAsync) await r.compileAsync(hall.group, this.camera);
+      else r.compile(hall.group, this.camera);
+    } catch { /* compile is a best-effort warmup */ }
+    if (this.hall?.group === hall.group) {
+      hall.group.visible = true;
+    } else if (orphan && hall.group.parent === this.scene) {
+      this.scene.remove(hall.group);
+      hall.group.visible = true;
+    }
+  }
+
+  private warmHall(id: HallId) {
+    if (this.hallCache.has(id) || this.warming) return;
+    this.warming = id;
+    try {
+      const hall = this.getOrBuildHall(id);
+      if (this.hallId !== id && hall.group.parent) this.scene.remove(hall.group);
+    } finally {
+      this.warming = null;
+    }
+  }
+
+  private schedulePreload() {
+    const run = () => {
+      this.warmHall("main");
+    };
+    const ric = (window as unknown as { requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => void }).requestIdleCallback;
+    if (typeof ric === "function") ric(run, { timeout: 1500 });
+    else window.setTimeout(run, 500);
+  }
+
+  private maybeWarmNearby() {
+    if (this.hallId !== "courtyard" || this.warming || this.leaving) return;
+    const x = this.localGroup.position.x;
+    const z = this.localGroup.position.z;
+    for (const h of SIDE_HALLS) {
+      if (this.hallCache.has(h.id)) continue;
+      const d = Math.hypot(x - h.x, z - h.z);
+      if (d < 9) {
+        this.warmHall(h.id);
+        return;
+      }
+    }
+  }
+
+  private async connectRoom(
+    roomName: string,
+    options: { name: string; look?: number; x?: number; z?: number; rotY?: number },
+  ) {
+    const prev = this.room;
+    const newRoom = await this.client.joinOrCreate(roomName, options);
+    if (prev && prev !== newRoom) {
+      try { await prev.leave(); } catch { /* already left */ }
+    }
+    this.clearRemotes();
+    this.room = newRoom;
+    this.sessionId = newRoom.sessionId;
+    this.bindRoom();
+  }
+
   private async enterRoom(
     roomName: string,
     options: { name: string; look?: number; x?: number; z?: number; rotY?: number },
   ) {
     this.leaving = true;
-    const prev = this.room;
-    const newRoom = await this.client.joinOrCreate(roomName, options);
-    if (prev) {
-      try { await prev.leave(); } catch { /* already left */ }
+    const id = this.hallIdFromRoom(roomName);
+    const spawn = (options.x !== undefined || options.z !== undefined)
+      ? { x: options.x ?? 0, z: options.z ?? 0, rotY: options.rotY ?? 0 }
+      : undefined;
+    const join = this.connectRoom(roomName, options);
+    this.showHall(id, spawn);
+    try {
+      await join;
+    } finally {
+      this.leaving = false;
+      this.doorCooldown = 1.2;
+      this.schedulePreload();
     }
-    this.clearRemotes();
-    this.unloadHall();
-    this.room = newRoom;
-    this.sessionId = newRoom.sessionId;
-    this.leaving = false;
-    this.doorCooldown = 1.2;
-
-    this.hallId = roomName === "courtyard" ? "courtyard"
-      : roomName === "main_hall" ? "main"
-      : (hallByRoom(roomName)?.id ?? "courtyard");
-
-    if (this.hallId === "courtyard") this.hall = buildCourtyard(this.scene);
-    else {
-      const def = hallById(this.hallId) ?? MAIN_HALL;
-      this.hall = buildInterior(this.scene, def);
-    }
-    this.tuneLights();
-    this.bindRoom();
-  }
-
-  private unloadHall() {
-    if (!this.hall) return;
-    this.hall.group.userData.tornDown = true;
-    this.scene.remove(this.hall.group);
-    this.hall.group.traverse((o) => {
-      const m = o as THREE.Mesh;
-      if (m.isMesh) {
-        m.geometry?.dispose();
-        const mats = Array.isArray(m.material) ? m.material : [m.material];
-        for (const mat of mats) mat?.dispose?.();
-      }
-    });
   }
 
   private clearRemotes() {
     this.remotes.forEach((r) => this.scene.remove(r.group));
     this.remotes.clear();
-    // Keep local mesh; it will be recreated on bindRoom addPlayer for self
-    if (this.localMonk) {
-      this.localGroup.clear();
-      this.localMonk = null;
-    }
+    // Keep the local monk across room changes — no need to rebuild the mesh.
   }
 
   private setupLights() {
@@ -451,27 +537,49 @@ export class Game {
     if (!this.nearDoor || this.leaving || this.doorCooldown > 0) return;
     const dest = this.nearDoor;
     this.leaving = true;
+    this.enterMarks = { trigger: Math.round(performance.now()) };
+    const destId: HallId = dest.room === "courtyard" ? "courtyard" : dest.hallId;
+    const spawn = dest.room === "courtyard"
+      ? (hallById(this.hallId) ? courtyardSpawnFrom(hallById(this.hallId)!) : { x: 0, z: -5, rotY: Math.PI })
+      : interiorSpawn(dest.hallId);
+    this.setFadeLabel(dest.room === "courtyard" ? "出殿" : "入殿");
+    const fadeOut = this.fadeDoor(1, 250);
+    const join = this.connectRoom(dest.room, {
+      name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
+    });
+    const cached = this.hallCache.has(destId);
+    // Cached halls can swap under the veil immediately so fade-in starts at 250ms.
+    if (cached) {
+      this.showHall(destId, spawn);
+      this.markEnter("hallShown");
+    }
+    // Never wait on the room join or a long build for the veil to lift.
+    await Promise.race([fadeOut, new Promise<void>((r) => setTimeout(r, 300))]);
+    if (!cached) {
+      this.showHall(destId, spawn);
+      this.markEnter("hallShown");
+    }
+    this.doorCooldown = 1.0;
+    const fadeIn = this.fadeDoor(0, 280);
     try {
-      const fadeOut = this.fadeDoor(1, 300);
-      if (dest.room === "courtyard") {
-        const def = hallById(this.hallId);
-        const spawn = def ? courtyardSpawnFrom(def) : { x: 0, z: -5, rotY: Math.PI };
-        await Promise.all([fadeOut, this.enterRoom("courtyard", {
-          name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
-        })]);
-      } else {
-        const spawn = interiorSpawn(dest.hallId);
-        await Promise.all([fadeOut, this.enterRoom(dest.room, {
-          name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
-        })]);
-      }
-      await this.fadeDoor(0, 300);
+      await join;
+      this.markEnter("joinDone");
     } catch (err) {
       this.leaving = false;
-      await this.fadeDoor(0, 200);
+      await fadeIn;
       this.toast("未能入殿，请稍后再试");
       console.warn(err);
+      return;
     }
+    this.leaving = false;
+    await fadeIn;
+    this.markEnter("fadeClear");
+    if (destId === "courtyard") this.schedulePreload();
+  }
+
+  private setFadeLabel(text: string) {
+    const el = document.getElementById("door-fade-msg");
+    if (el) el.textContent = text;
   }
 
   private fadeDoor(opacity: number, ms: number): Promise<void> {
@@ -495,6 +603,7 @@ export class Game {
     this.muyuPanel.update(dt);
     this.beads.update(dt);
     this.updateProximity();
+    this.maybeWarmNearby();
     if (this.doorCooldown > 0) this.doorCooldown = Math.max(0, this.doorCooldown - dt);
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
@@ -676,6 +785,8 @@ export class Game {
       joinHall: (id: string) => Promise<void>;
       seedIncense: (n?: number, burnerId?: string) => void;
       hallId: () => string;
+      hallCached: (id: string) => boolean;
+      enterTiming: () => Record<string, number>;
       statuesReady: () => Promise<void>;
       setAnim: (opts: { moving?: boolean | null; sitting?: boolean | null; phase?: number | null }) => void;
       sitOnCushion: (id?: number) => void;
@@ -714,6 +825,8 @@ export class Game {
       this.room?.send("debug_seed_incense", { count: n, burnerId });
     };
     w.hallId = () => this.hallId;
+    w.hallCached = (id) => this.hallCache.has(id as HallId);
+    w.enterTiming = () => ({ ...this.enterMarks });
     w.statuesReady = () => this.hall?.statuesReady ?? Promise.resolve();
     w.setAnim = (opts) => {
       if (opts.sitting !== undefined && opts.sitting !== null) {

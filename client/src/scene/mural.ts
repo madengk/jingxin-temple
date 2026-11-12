@@ -4,7 +4,12 @@ import * as THREE from "three";
  *  Palette and motifs — circular mandorlas, seated/standing gilt figures,
  *  lotus and cloud — follow traditional 佛画 / 壁画 vocabulary
  *  (Dunhuang and later East-Asian temple walls are public-domain in style). */
-export function muralTexture(seed = 1, w = 2048, h = 1536): THREE.CanvasTexture {
+const muralCache = new Map<string, THREE.CanvasTexture>();
+
+export function muralTexture(seed = 1, w = 1024, h = 768): THREE.CanvasTexture {
+  const key = `mural:${seed}:${w}x${h}`;
+  const hit = muralCache.get(key);
+  if (hit) return hit;
   const c = document.createElement("canvas");
   c.width = w;
   c.height = h;
@@ -59,18 +64,23 @@ export function muralTexture(seed = 1, w = 2048, h = 1536): THREE.CanvasTexture 
     cloud(g, rnd() * w, 40 + rnd() * 160, 80 + rnd() * 120);
   }
 
-  const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace;
-  t.anisotropy = 8;
-  t.wrapS = THREE.ClampToEdgeWrapping;
-  t.wrapT = THREE.ClampToEdgeWrapping;
-  return t;
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.wrapS = THREE.ClampToEdgeWrapping;
+  tex.wrapT = THREE.ClampToEdgeWrapping;
+  muralCache.set(key, tex);
+  return tex;
 }
 
-export function sideMuralTexture(seed = 2, w = 1024, h = 1024): THREE.CanvasTexture {
-  const t = muralTexture(seed, w, h);
-  t.wrapS = t.wrapT = THREE.RepeatWrapping;
-  return t;
+export function sideMuralTexture(seed = 2, w = 512, h = 512): THREE.CanvasTexture {
+  const key = `side:${seed}:${w}x${h}`;
+  const hit = muralCache.get(key);
+  if (hit) return hit;
+  const tex = muralTexture(seed, w, h).clone();
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  muralCache.set(key, tex);
+  return tex;
 }
 
 function mulberry(a: number) {
