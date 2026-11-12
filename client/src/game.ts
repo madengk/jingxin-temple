@@ -13,7 +13,7 @@ import {
   CUSHION_COUNT, PLAYER_RADIUS, SIT_RANGE,
   type HallId, ALL_HALLS, MAIN_HALL, SIDE_HALLS,
   clampToWalkable, cushionPosition, dist2, nearestBurner,
-  courtyardDoorHit, interiorExitHit, courtyardSpawnFrom, hallById, hallByRoom,
+  courtyardDoorHit, interiorExitHit, courtyardSpawnFrom, interiorSpawn, hallById, hallByRoom,
 } from "../../server/src/shared";
 
 export function serverUrl(): string {
@@ -156,7 +156,7 @@ export class Game {
     this.room = newRoom;
     this.sessionId = newRoom.sessionId;
     this.leaving = false;
-    this.doorCooldown = 0.8;
+    this.doorCooldown = 1.2;
 
     this.hallId = roomName === "courtyard" ? "courtyard"
       : roomName === "main_hall" ? "main"
@@ -452,20 +452,36 @@ export class Game {
     const dest = this.nearDoor;
     this.leaving = true;
     try {
+      const fadeOut = this.fadeDoor(1, 300);
       if (dest.room === "courtyard") {
         const def = hallById(this.hallId);
-        const spawn = def ? courtyardSpawnFrom(def) : { x: 0, z: -4, rotY: Math.PI };
-        await this.enterRoom("courtyard", {
+        const spawn = def ? courtyardSpawnFrom(def) : { x: 0, z: -5, rotY: Math.PI };
+        await Promise.all([fadeOut, this.enterRoom("courtyard", {
           name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
-        });
+        })]);
       } else {
-        await this.enterRoom(dest.room, { name: this.myName, look: this.myLook, z: 2.2, rotY: 0 });
+        const spawn = interiorSpawn(dest.hallId);
+        await Promise.all([fadeOut, this.enterRoom(dest.room, {
+          name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
+        })]);
       }
+      await this.fadeDoor(0, 300);
     } catch (err) {
       this.leaving = false;
+      await this.fadeDoor(0, 200);
       this.toast("未能入殿，请稍后再试");
       console.warn(err);
     }
+  }
+
+  private fadeDoor(opacity: number, ms: number): Promise<void> {
+    const el = document.getElementById("door-fade");
+    if (!el) return Promise.resolve();
+    el.style.transition = `opacity ${ms}ms ease`;
+    void el.offsetWidth;
+    el.style.opacity = String(opacity);
+    el.style.pointerEvents = opacity > 0 ? "auto" : "none";
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
 
   private loop = () => {
@@ -656,6 +672,7 @@ export class Game {
       freezeCam: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => void;
       unfreezeCam: () => void;
       teleport: (x: number, z: number, rotY?: number) => void;
+      holdWalk: (key: string | false) => void;
       joinHall: (id: string) => Promise<void>;
       seedIncense: (n?: number, burnerId?: string) => void;
       hallId: () => string;
@@ -674,7 +691,13 @@ export class Game {
       const c = clampToWalkable(x, z, this.hallId);
       this.localGroup.position.set(c.x, 0, c.z);
       this.localGroup.rotation.y = rotY;
+      this.controls.dest = null;
       this.room?.send("move", { x: c.x, z: c.z, rotY });
+    };
+    w.holdWalk = (key) => {
+      this.controls.dest = null;
+      for (const k of ["w", "a", "s", "d"]) this.controls.keys.delete(k);
+      if (key) this.controls.keys.add(String(key).toLowerCase());
     };
     w.joinHall = async (id: string) => {
       const room = id === "courtyard" ? "courtyard"

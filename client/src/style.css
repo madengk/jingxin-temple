@@ -324,3 +324,15 @@ h1 {
   #credits { left: calc(14px + var(--safe-l)); }
   h1 { font-size: 34px; }
 }
+
+
+/* —— Door transition fade —— */
+#door-fade {
+  position: fixed;
+  inset: 0;
+  background: #100a08;
+  opacity: 0;
+  pointer-events: none;
+  z-index: 200;
+  transition: opacity 300ms ease;
+}

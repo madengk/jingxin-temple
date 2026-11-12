@@ -509,11 +509,23 @@ function buildFacade(
   g.add(M(new THREE.BoxGeometry(W + 0.8, 0.28, D + 1.1), roof, 0, H + 0.25, 0));
   g.add(M(new THREE.BoxGeometry(0.5, 0.4, D + 0.6), goldM, 0, H + 0.6, 0));
   g.add(M(new THREE.BoxGeometry(doorW, 0.12, 0.6), darkWood, 0, 0.06, frontZ + 0.2));
+  // Columns at the door posts only, plus side/back walls. The opening itself is clear
+  // so the approach trigger in front of the façade is never blocked.
   const fx = Math.sin(h.rotY), fz = Math.cos(h.rotY);
-  for (const [lx, lz] of [[-2.6, 0], [2.6, 0], [0, -2], [-2.2, 1.6], [2.2, 1.6]]) {
+  const doorHalf = doorW / 2;
+  const posts: [number, number, number][] = [
+    [-doorHalf, frontZ, 0.28],
+    [doorHalf, frontZ, 0.28],
+    [-(doorHalf + 1.05), frontZ, 0.5],
+    [doorHalf + 1.05, frontZ, 0.5],
+    [-W / 2, 0, 0.7],
+    [W / 2, 0, 0.7],
+    [0, -D / 2, 0.7],
+  ];
+  for (const [lx, lz, r] of posts) {
     const wx = h.x + lx * (-fz) + lz * fx;
     const wz = h.z + lx * fx + lz * fz;
-    obstacles.push({ x: wx, z: wz, r: 1.05 });
+    obstacles.push({ x: wx, z: wz, r });
   }
   return g;
 }
@@ -749,16 +761,37 @@ export function resolveMove(
   obstacles: Obstacle[], radius: number = PLAYER_RADIUS,
 ): { x: number; z: number } {
   let x = x1, z = z1;
-  for (const o of obstacles) {
-    const dx = x - o.x, dz = z - o.z;
-    const d = Math.hypot(dx, dz);
-    const min = o.r + radius;
-    if (d < min && d > 1e-5) {
-      const s = min / d;
-      x = o.x + dx * s;
-      z = o.z + dz * s;
-    } else if (d <= 1e-5) {
-      x = o.x + min;
+  const vx = x1 - x0, vz = z1 - z0;
+  const vlen = Math.hypot(vx, vz);
+  // A couple of passes so neighbouring posts don't re-overlap after a push.
+  for (let pass = 0; pass < 3; pass++) {
+    for (const o of obstacles) {
+      let dx = x - o.x, dz = z - o.z;
+      let d = Math.hypot(dx, dz);
+      const min = o.r + radius;
+      if (d >= min) continue;
+      if (d <= 1e-5) {
+        if (vlen > 1e-6) { dx = -vz / vlen; dz = vx / vlen; }
+        else { dx = 1; dz = 0; }
+        d = 1;
+      }
+      let nx = dx / d, nz = dz / d;
+      // Head-on hits used to pin the player on the incense burner in front of
+      // the main hall. Nudge along the tangent so they slide around it.
+      if (vlen > 1e-6) {
+        const headOn = -(vx * nx + vz * nz) / vlen;
+        if (headOn > 0.92) {
+          let sx = -vz / vlen, sz = vx / vlen;
+          if ((x0 - o.x) * sx + (z0 - o.z) * sz < 0) { sx = -sx; sz = -sz; }
+          const mix = 0.4;
+          nx = nx * (1 - mix) + sx * mix;
+          nz = nz * (1 - mix) + sz * mix;
+          const nlen = Math.hypot(nx, nz) || 1;
+          nx /= nlen; nz /= nlen;
+        }
+      }
+      x = o.x + nx * min;
+      z = o.z + nz * min;
     }
   }
   return { x, z };

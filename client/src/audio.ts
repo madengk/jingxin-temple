@@ -1,13 +1,12 @@
 /**
  * Audio for 静心寺.
  *
- * - BGM: 《大悲咒》 (千手千眼观世音菩萨广大圆满无碍大悲心陀罗尼).
- *   A licensed real monastic chant was not available (see docs/LICENSES.md);
- *   the current file is the project's earlier original formant-synthesis
- *   recitation, looped after the first user gesture. Prefers /audio/dabei-zhou.ogg
- *   and falls back to .m4a / .mp3 for iOS Safari.
+ * - BGM: 《大悲咒（经典版）》 provided by the project owner (Henry), looped
+ *   after the first user gesture. Prefers /audio/dabei-zhou.ogg and falls
+ *   back to .m4a / .mp3 for iOS Safari. See docs/LICENSES.md.
  * - During meditation the 大悲咒 continues (slightly calmer); no substitute chant.
- * - Wooden fish & bead clicks: procedurally generated one-shots (original).
+ * - Wooden fish: a real recorded mokugyo strike (CC0, Kōyasan). Bead clicks
+ *   remain a short original WebAudio one-shot.
  */
 
 const VOL_KEY = "jingxin_volume";
@@ -91,7 +90,11 @@ export class TempleAudio {
   }
 
   playMuyu() {
-    this.playBuf(this.muyuBuf, 0.9, 1 + (Math.random() - 0.5) * 0.04);
+    // New BufferSource each tap so rapid hits overlap instead of cutting off.
+    // Slight pitch/volume jitter keeps a run of strikes from sounding identical.
+    const amp = 0.82 + Math.random() * 0.2;
+    const rate = 1 + (Math.random() - 0.5) * 0.06;
+    this.playBuf(this.muyuBuf, amp, rate);
   }
 
   playBead() {
@@ -126,10 +129,20 @@ export class TempleAudio {
     this.sfxGain.gain.value = 0.9;
     this.sfxGain.connect(this.master);
 
-    this.muyuBuf = makeWoodenFish(ctx);
+    this.muyuBuf = makeWoodenFish(ctx); // fallback until the recorded strike loads
     this.clickBuf = makeBeadClick(ctx);
     this.bowlBuf = makeSingingBowl(ctx, 196, 5.5);
     ctx.onstatechange = () => this.tryStartBgm();
+    void this.loadMuyu(ctx);
+  }
+
+  private async loadMuyu(ctx: AudioContext) {
+    try {
+      const arr = await fetchFirstAudio(["/audio/muyu.ogg", "/audio/muyu.m4a", "/audio/muyu.mp3"]);
+      this.muyuBuf = await ctx.decodeAudioData(arr.slice(0));
+    } catch (err) {
+      console.warn("木鱼录音未能加载，暂用合成回退", err);
+    }
   }
 
   private async startBgm() {
@@ -410,7 +423,10 @@ export class TempleAudio {
 
 
 async function fetchDabeiBytes(): Promise<ArrayBuffer> {
-  const paths = ["/audio/dabei-zhou.ogg", "/audio/dabei-zhou.m4a", "/audio/dabei-zhou.mp3"];
+  return fetchFirstAudio(["/audio/dabei-zhou.ogg", "/audio/dabei-zhou.m4a", "/audio/dabei-zhou.mp3"]);
+}
+
+async function fetchFirstAudio(paths: string[]): Promise<ArrayBuffer> {
   let last = "no candidates";
   for (const path of paths) {
     try {
@@ -421,7 +437,7 @@ async function fetchDabeiBytes(): Promise<ArrayBuffer> {
       last = path + " " + String(err);
     }
   }
-  throw new Error("dabei fetch failed: " + last);
+  throw new Error("audio fetch failed: " + last);
 }
 
 function makeNoiseSource(ctx: AudioContext, seconds: number): AudioBufferSourceNode {

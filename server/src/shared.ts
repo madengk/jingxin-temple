@@ -169,13 +169,20 @@ export interface BurnerDef {
   radius: number;
 }
 
+/** Courtyard-side distance from a hall's centre to its façade plane. */
+export function hallFrontDistance(h: HallDef): number {
+  if (h.id === "main") return 0.48; // visual façade at world z≈0.12
+  return Math.abs(h.x) > 15 ? 2.7 : 2.1;
+}
+
 function burnerInFront(h: HallDef): BurnerDef {
-  // Stand ~2.6 units in front of the facade, along the facing direction.
+  // Stand in the courtyard, clearly in front of the door (not in the opening).
   // rotY = 0 faces +Z, π/2 faces +X, −π/2 faces −X, π faces −Z.
   const fx = Math.sin(h.rotY);
   const fz = Math.cos(h.rotY);
-  // For MAIN_HALL rotY=π, facing −Z, burner in the courtyard at z≈−2.4.
-  const dist = h.id === "main" ? 2.6 : 2.55;
+  // Main hall: z≈−2.0. Side halls: ~2.8 units past the façade so the burner
+  // no longer sits in the doorway and blocks entry.
+  const dist = h.id === "main" ? 2.6 : hallFrontDistance(h) + 2.8;
   return {
     id: `burner_${h.id}`,
     hallId: h.id,
@@ -233,26 +240,22 @@ function inBox(x: number, z: number, b: { minX: number; maxX: number; minZ: numb
 
 /** Push a courtyard position out of a side-hall building, leaving the doorway open. */
 function pushOutOfBuilding(x: number, z: number, h: HallDef): { x: number; z: number } {
-  // Buildings are ~6 wide along the facade and ~4 deep.
-  const alongX = Math.abs(Math.cos(h.rotY)); // 1 when facade is along X (south halls)
-  const halfW = 3.1; // along facade
-  const halfD = 2.15; // depth
-  // Local: +depth is behind the facade (into the building, opposite facing).
   const fx = Math.sin(h.rotY);
   const fz = Math.cos(h.rotY);
-  // Facing dir points into the courtyard; building extends opposite and a little forward.
   const dx = x - h.x;
   const dz = z - h.z;
   const forward = dx * fx + dz * fz; // positive = courtyard side
   const side = dx * (-fz) + dz * fx;
-  const doorHalf = 1.25;
-  // The door opening is on the courtyard face, |side|<doorHalf, forward in [−0.2, 2.4]
-  const inDoor = Math.abs(side) < doorHalf && forward > -0.4 && forward < 2.6;
+  const front = hallFrontDistance(h);
+  const back = -front;
+  const halfW = 3.15;
+  const doorHalf = 1.4;
+  // Opening on the courtyard face stays walkable; walls are solid.
+  const inDoor = Math.abs(side) < doorHalf && forward > front - 1.2 && forward < front + 2.2;
   if (inDoor) return { x, z };
-  const inFoot = Math.abs(side) < halfW && forward < 1.0 && forward > -halfD * 2;
+  const inFoot = Math.abs(side) < halfW && forward < front + 0.35 && forward > back - 0.25;
   if (!inFoot) return { x, z };
-  // Push toward the courtyard (positive forward)
-  const push = 1.05 - forward;
+  const push = (front + 0.4) - forward;
   return { x: x + fx * push, z: z + fz * push };
 }
 
@@ -289,18 +292,19 @@ export function clampToWalkable(x: number, z: number, hallId: HallId = "courtyar
   return { x: nx, z: nz };
 }
 
-/** Spawn just inside a hall door, facing the deity (+Z). */
+/** Spawn just inside a hall door, facing the deity (+Z), clear of the exit trigger. */
 export function interiorSpawn(_hallId: HallId): { x: number; z: number; rotY: number } {
-  return { x: 0, z: 2.2, rotY: 0 };
+  return { x: 0, z: 2.6, rotY: 0 };
 }
 
-/** Spawn in the courtyard after leaving a hall, just outside its door, facing the yard. */
+/** Spawn in the courtyard after leaving a hall, past the door trigger and burner, facing the yard. */
 export function courtyardSpawnFrom(h: HallDef): { x: number; z: number; rotY: number } {
   const fx = Math.sin(h.rotY);
   const fz = Math.cos(h.rotY);
+  const dist = hallFrontDistance(h) + 4.6;
   return {
-    x: h.x + fx * 3.4,
-    z: h.z + fz * 3.4,
+    x: h.x + fx * dist,
+    z: h.z + fz * dist,
     rotY: h.rotY, // face into the courtyard (same as the facade facing)
   };
 }
@@ -333,10 +337,13 @@ export function nearestBurner(
 /** @deprecated use BURNERS; kept so older call sites that only know the main hall still typecheck during the swap. */
 export const INCENSE_BURNER = BURNERS.find((b) => b.hallId === "main") ?? { x: 0, z: -2.6, radius: INCENSE_RANGE };
 
-/** Door threshold: walking past this in the courtyard triggers a room change. */
+/**
+ * Door approach: a generous zone in front of each façade, reached before any
+ * wall collider. Walking into this zone starts the room transition.
+ */
 export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
-  // Main hall door: z ≈ 0, |x| < 3.6
-  if (z > -0.35 && z < 1.2 && Math.abs(x) < 3.6) return MAIN_HALL;
+  // Main hall: on the steps, after the entrance burner at z≈−2, before the wall at z≈0.12.
+  if (z > -1.8 && z < 0.8 && Math.abs(x) < 3.8) return MAIN_HALL;
   for (const h of SIDE_HALLS) {
     const fx = Math.sin(h.rotY);
     const fz = Math.cos(h.rotY);
@@ -344,16 +351,16 @@ export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
     const dz = z - h.z;
     const forward = dx * fx + dz * fz;
     const side = dx * (-fz) + dz * fx;
-    // Crossing into the doorway (forward near 0, going negative = into building)
-    if (Math.abs(side) < 1.2 && forward < 1.05 && forward > -0.8) return h;
+    const front = hallFrontDistance(h);
+    if (Math.abs(side) < 1.5 && forward < front + 1.55 && forward > front - 0.35) return h;
   }
   return undefined;
 }
 
-/** Leaving an interior through the entrance (local z small). */
+/** Leaving an interior through the entrance (local z toward the door). */
 export function interiorExitHit(x: number, z: number, hallId: HallId): boolean {
-  const open = hallId === "main" ? 3.8 : 2.0;
-  return z < 0.15 && Math.abs(x) < open;
+  const open = hallId === "main" ? 4.0 : 2.2;
+  return z < 0.95 && Math.abs(x) < open;
 }
 
 // Back-compat alias used by courtyard enclosure / older facades.

@@ -74,7 +74,8 @@
   - **经文**：唐代伽梵达摩译八十四句音写，属公有领域。
   - **录音**：《大悲咒（经典版）》，约 31 分钟，由项目所有者 Henry 提供；Henry 于 2026-11-12 确认该录音为其本人制作，授权本项目在网站及 App 中使用。
   - 入寺点击后开始播放；打坐时继续播放《大悲咒》（音量略降），不以其他诵经替换。保留静音与音量控制。
-- **木鱼、佛珠**：浏览器 WebAudio 程序合成的短促敲击，原创，可商用。
+- **木鱼**：真实敲击录音。来源为 Freesound 用户 [jonopodmore](https://freesound.org/people/jonopodmore/) 的 [Mokugyo.wav](https://freesound.org/people/jonopodmore/sounds/607215/)，在日本高野山以原配布包槌击打小型木鱼，AKG 414 录制；许可为 [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)，可商用、无需另行授权或署名。原 WAV 下载需 Freesound 登录，本项目采用同一条目可公开获取的 HQ 预览（MP3），裁切为单次敲击并峰值规范到约 −3 dBFS，收入 `client/public/audio/muyu.ogg` 与 `muyu.m4a`。预览源文件存于 `docs/sources/audio/mokugyo-jonopodmore-607215-hq.mp3`。
+- **佛珠**：浏览器 WebAudio 程序合成的短促敲击，原创，可商用。
 - 若《大悲咒》音频文件加载失败，会回退到原创的低频持续音与稀疏琴笛（同样为原创合成）。
 
 未使用 Microsoft edge-tts 或其他使用条款不明确的语音服务来制作发行音频。
@@ -89,7 +90,7 @@
 
 ## 游戏内署名
 
-大厅左下角有一行署名，指向本文件所载的 CC0 照片来源与《大悲咒》原创合成许可。
+大厅左下角有一行署名，指向本文件所载的《大悲咒》录音来源、木鱼 CC0 录音与造像许可。
 
 ## Round 5 — 金身程序造像、壁画与音声（2026-11-12）
 
@@ -97,7 +98,7 @@
 
 殿壁 **佛教壁画** 为原创画布绘制（圆形光背、坐立圣像、莲花与云气，青绿与金红 Palettes），师法敦煌及汉地寺院壁画的公有领域传统语汇，不复制任何在世画家或受版权保护的特定画作。
 
-背景音乐 **大悲咒**：经文本身为公有领域；所用音轨 `client/public/audio/dabei-zhou.ogg` 为前轮 **原创合成**（非商业录音翻录），可继续商用。木鱼与佛珠敲击音为原创程序合成。
+背景音乐 **大悲咒**：经文本身为公有领域。Round 5 当时所用音轨为前轮原创合成；**现已替换** 为项目所有者 Henry 提供并确认由其本人制作的《大悲咒（经典版）》录音（见上文「音频」节，2026-11-12）。木鱼敲击音现为真实录音（见上文）；佛珠敲击音仍为原创程序合成。
 
 香炉线香：**仅存于服务器内存**，每炷自放置起精确燃烧 10 分钟后由服务器删除；不写 JSON / SQLite，无倒计时 UI。Render 免费磁盘本就易失，此设计亦避免依赖磁盘。
 
@@ -155,7 +156,7 @@
 
 ### 背景音乐《大悲咒》
 
-本轮按「真实唱诵、且许可明确可商用」的标准检索了 Wikimedia Commons、Internet Archive（含 licenseurl 为 Creative Commons / Public Domain 的条目）、Openverse，并核对 Freesound / FMA 检索结果。**没有找到**符合要求的汉传寺院或居士唱诵《大悲咒》（Nīlakaṇṭha Dhāraṇī / Great Compassion Mantra）录音。因此 **没有替换** `client/public/audio/dabei-zhou.ogg`，仍使用前轮原创共振峰合成音轨（经文本身为公有领域，录音为项目原创，可商用），并在首次用户交互后循环播放。客户端会依次尝试 `.ogg` / `.m4a` / `.mp3`，便于以后换上合法录音后在 iOS Safari 上回退。
+本轮按「真实唱诵、且许可明确可商用」的标准检索了 Wikimedia Commons、Internet Archive（含 licenseurl 为 Creative Commons / Public Domain 的条目）、Openverse，并核对 Freesound / FMA 检索结果。当时 **没有找到**符合要求的汉传寺院或居士唱诵《大悲咒》（Nīlakaṇṭha Dhāraṇī / Great Compassion Mantra）录音，故 Round 8 **尚未替换** 合成音轨。其后（2026-11-12）项目所有者 Henry 提供并确认由其本人制作的《大悲咒（经典版）》录音，已替换 `client/public/audio/dabei-zhou.ogg` / `.m4a`（见上文「音频」节）。客户端仍依次尝试 `.ogg` / `.m4a` / `.mp3`，便于 iOS Safari 回退。
 
 核查过、但**不能采用**的候选：
 
@@ -169,7 +170,7 @@
 | 黄慧音、海涛法师、各寺院课诵等商业或未授权转载 | 各流媒体与佛学资料站 | 版权录音，不可嵌入网站或即将上架的 App |
 | 宣化上人相关 CC-BY-SA 音频（Internet Archive） | 例如 https://archive.org/details/Shurangama_Mantra_000_Lines_001-9_Refuge_Buddhism | 许可可用，但是《楞严咒》讲解/唱诵，**不是**《大悲咒》 |
 
-若之后获得一首许可明确（CC0 / CC-BY / CC-BY-SA 或公有领域）的汉传《大悲咒》唱诵，或权利人书面授权，即可替换该音轨并更新本页与界面致谢。
+上述公开检索的限制仍作记录。背景音乐现已改用项目所有者提供并书面确认的录音，界面致谢已同步更新。
 
 
 ## Round 10 — 玩家小和尚改为 fal Hunyuan 3D Pro（未并入 main）
@@ -182,3 +183,7 @@
 | 打坐 | 正/侧/背多视图 + PBR + face_count=80000 | 基础 $0.375 + PBR $0.15 + 多视图 $0.15 + 自定义面数 $0.15 ≈ **$0.825** | `01a1cff3-9a62-7573-95db-97498c92b194` | `client/public/statues/fal/monk-sit.glb`（约 1.07 MB） |
 
 两套合计约 **$1.50**，均一次成功、未重试。原始未压缩 GLB 不进 Git。玩家之间 clone 共用几何与材质。行走为起伏/摆动/微前倾，无骨骼；打坐时切换打坐网格。
+
+## Round 12 — 木鱼改为真实敲击录音（2026-11-13）
+
+将原先 WebAudio 程序合成的木鱼声，替换为 Freesound 用户 jonopodmore 在日本高野山录制的真实木鱼敲击（[Mokugyo.wav](https://freesound.org/people/jonopodmore/sounds/607215/)，[CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/)）。裁切为单次干净敲击（约 0.55 秒，峰值约 −3 dBFS），以 `muyu.ogg` / `muyu.m4a` 加载；连续敲击时各次叠放，并带轻微音高与音量抖动。佛珠敲击仍为原创合成。若录音文件未能加载，客户端回退到原先的合成木鱼。
