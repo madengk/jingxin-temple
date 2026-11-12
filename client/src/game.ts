@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
 import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
 import { Client, Room } from "colyseus.js";
 import { Monk } from "./scene/monk";
@@ -183,6 +184,12 @@ export class Game {
     const fill = new THREE.DirectionalLight(0xffe8d0, 0.55);
     fill.position.set(4, 10, 8);
     this.scene.add(fill);
+
+    // Warm IBL so gilt PBR metals reflect something (without this, metalness≈1 is black).
+    const pmrem = new THREE.PMREMGenerator(this.renderer);
+    this.scene.environment = pmrem.fromScene(new RoomEnvironment(), 0.04).texture;
+    this.scene.environmentIntensity = 0.7;
+    pmrem.dispose();
 
     this.scene.add(this.localGroup);
     this.camera.position.set(0, 6, -28);

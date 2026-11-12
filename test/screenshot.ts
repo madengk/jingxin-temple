@@ -1,6 +1,6 @@
 /**
  * Headless Chromium screenshots of 静心寺.
- * SCREENSHOT_PREFIX=round3 writes screenshots/round3-*.png
+ * SCREENSHOT_PREFIX=round4 writes screenshots/round4-*.png
  */
 import fs from "node:fs";
 import path from "node:path";
@@ -95,6 +95,7 @@ async function main() {
   // Close plaques: frozen camera, monk parked out of frame
   // 释迦牟尼佛 / 如来佛祖 — seated on dais at (0, 21.6), plaque in front
   await freezeCam(page, 0, 3.15, 12.2, 0, 2.85, 20.6);
+  await shot(page, "buddha-front");
   await shot(page, "buddha-plaque");
 
   // Eastern kings at x=−13, face +X (inward). Camera in the aisle looking west.
@@ -112,6 +113,14 @@ async function main() {
   // 韦陀 at (−3.6, 3.2), plaque faces −Z (the entrance, south)
   await freezeCam(page, -2.2, 2.2, -1.5, -3.6, 2.05, 3.2);
   await shot(page, "weituo");
+
+  // 3/4 side angles — prove the relief has real volume, not a flat card.
+  // Buddha: from the southeast aisle, seeing the right side and the mandorla edge.
+  await freezeCam(page, 5.8, 3.5, 14.8, 0.2, 3.2, 21.4);
+  await shot(page, "buddha-three-quarter");
+  // 西方广目 (raised knee + dragon): from the aisle, slightly south, clears pillars at x=10, z=5/10.
+  await freezeCam(page, 6.0, 2.85, 5.7, 13.0, 2.5, 8.15);
+  await shot(page, "king-west-three-quarter");
 
   // Incense + a turned-facing shot (camera follows behind the monk)
   await teleport(page, 0, 15.5, 0);

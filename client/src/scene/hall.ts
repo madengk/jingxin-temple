@@ -2,9 +2,8 @@ import * as THREE from "three";
 import { OTHER_HALLS, allCushionPositions, INCENSE_BURNER, CUSHION_RADIUS } from "../../../server/src/shared";
 import {
   createBuddhaCutout, createKingCutout, createWeituoCutout,
-  type CutoutId,
+  type CutoutId, type ReliefMap,
 } from "./cutouts";
-import type { Texture } from "three";
 
 export type Obstacle = { x: number; z: number; r: number };
 
@@ -105,7 +104,7 @@ function plaqueTex(title: string, sub = "即将开放"): THREE.CanvasTexture {
   return t;
 }
 
-export function buildHall(scene: THREE.Scene, cutouts?: Map<CutoutId, Texture>): HallObjects {
+export function buildHall(scene: THREE.Scene, cutouts?: ReliefMap): HallObjects {
   const group = new THREE.Group();
   const obstacles: Obstacle[] = [];
   const wood = mat(0x6a4a32, { map: woodTex(), roughness: 0.75 });
@@ -252,7 +251,7 @@ export function buildHall(scene: THREE.Scene, cutouts?: Map<CutoutId, Texture>):
   group.add(M(new THREE.BoxGeometry(4, 0.35, 1.1), verm, 0, 0.2, 18.0));
   obstacles.push({ x: 0, z: 21.8, r: 4.2 });
 
-  // statues — CC0 photo cutouts when loaded, procedural geometry as fallback
+  // statues — CC0 photo reliefs when loaded, procedural geometry as fallback
   const buddha = createBuddhaCutout(cutouts?.get("buddha"));
   group.add(buddha);
   obstacles.push({ x: 0, z: 21.6, r: 2.8 });
