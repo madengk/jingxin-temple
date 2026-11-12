@@ -11,6 +11,7 @@ import {
 } from "./deities";
 import { createNamePlaque } from "./statues";
 import { replaceWithGilt, giltMode, GILT_FOR } from "./giltModels";
+import { paintedWall, makeDaySky } from "./exteriorArt";
 
 export type Obstacle = { x: number; z: number; r: number };
 
@@ -339,7 +340,7 @@ function candlesAndVases(parent: THREE.Group, y: number, z: number, spread: numb
 }
 
 /** Courtyard: all façades with gilt 匾额, bronze burners at every entrance, door portals. */
-export function buildCourtyard(scene: THREE.Scene): HallObjects {
+export function buildCourtyard(_scene: THREE.Scene): HallObjects {
   const group = new THREE.Group();
   const obstacles: Obstacle[] = [];
   const verm = mat(0x8b1e1e, { roughness: 0.5, metalness: 0.08 });
@@ -347,12 +348,12 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   const plaster = mat(0xe8dcc8, { roughness: 0.85 });
   const roof = mat(0x6b1c16, { roughness: 0.6, metalness: 0.1 });
   const darkWood = mat(0x2a1c12, { roughness: 0.8 });
-  const stone = mat(0x8a847c, { map: stoneTex(), roughness: 0.9 });
+  const stone = mat(0xc9c0b2, { map: stoneTex(), roughness: 0.88 });
 
   const court = M(new THREE.BoxGeometry(48, 0.12, 42), stone, 0, -0.06, -16);
   court.receiveShadow = true;
   group.add(court);
-  const path = M(new THREE.BoxGeometry(4.0, 0.04, 28), mat(0x5a5248, { roughness: 0.9 }), 0, 0.02, -16);
+  const path = M(new THREE.BoxGeometry(4.0, 0.04, 28), mat(0x8a8074, { roughness: 0.9 }), 0, 0.02, -16);
   path.receiveShadow = true;
   group.add(path);
 
@@ -360,9 +361,9 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   group.add(M(new THREE.BoxGeometry(48, 4.2, 0.5), plaster, 0, 2.1, -36.4));
   group.add(M(new THREE.BoxGeometry(0.5, 4.2, 40), plaster, -23.8, 2.1, -16.5));
   group.add(M(new THREE.BoxGeometry(0.5, 4.2, 40), plaster, 23.8, 2.1, -16.5));
-  group.add(M(new THREE.BoxGeometry(18, 5.5, 0.6), verm, -13, 2.75, -36.3));
-  group.add(M(new THREE.BoxGeometry(18, 5.5, 0.6), verm, 13, 2.75, -36.3));
-  group.add(M(new THREE.BoxGeometry(10, 1.6, 0.65), verm, 0, 5.5, -36.3));
+  group.add(paintedWall(18, 5.5, 0.6, -13, 2.75, -36.3));
+  group.add(paintedWall(18, 5.5, 0.6, 13, 2.75, -36.3));
+  group.add(paintedWall(10, 1.6, 0.65, 0, 5.5, -36.3));
   const gatePlaque = hangingPlaque("静心寺", 3.4, 1.15);
   gatePlaque.position.set(0, 5.5, -36.0);
   group.add(gatePlaque);
@@ -385,9 +386,9 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   group.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, -hallW / 2, wallH / 2, midZ));
   group.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, hallW / 2, wallH / 2, midZ));
   const leafW = (hallW - doorW) / 2;
-  group.add(M(new THREE.BoxGeometry(leafW, wallH, 0.4), verm, -(hallW / 2 - leafW / 2), wallH / 2, frontZ));
-  group.add(M(new THREE.BoxGeometry(leafW, wallH, 0.4), verm, (hallW / 2 - leafW / 2), wallH / 2, frontZ));
-  group.add(M(new THREE.BoxGeometry(doorW + 0.8, wallH - doorH, 0.45), verm, 0, doorH + (wallH - doorH) / 2, frontZ));
+  group.add(paintedWall(leafW, wallH, 0.4, -(hallW / 2 - leafW / 2), wallH / 2, frontZ));
+  group.add(paintedWall(leafW, wallH, 0.4, (hallW / 2 - leafW / 2), wallH / 2, frontZ));
+  group.add(paintedWall(doorW + 0.8, wallH - doorH, 0.45, 0, doorH + (wallH - doorH) / 2, frontZ));
   for (const x of [-doorW / 2, doorW / 2, -10.6, 10.6, -15.4, 15.4]) {
     group.add(M(new THREE.CylinderGeometry(0.36, 0.4, wallH, 14), verm, x, wallH / 2, frontZ + 0.12));
     group.add(M(new THREE.CylinderGeometry(0.48, 0.4, 0.22, 12), goldM, x, wallH + 0.02, frontZ + 0.12));
@@ -453,13 +454,11 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
     group.add(createPine(x, z));
     obstacles.push({ x, z, r: 0.8 });
   }
-  const moon = new THREE.Mesh(new THREE.SphereGeometry(2.2, 16, 16), new THREE.MeshBasicMaterial({ color: 0xfff2d0 }));
-  moon.position.set(-16, 22, -48);
-  group.add(moon);
+  group.add(makeDaySky());
 
   // Caller attaches the group (allows off-screen warmup).
-  scene.background = new THREE.Color(0x1c1520);
-  scene.fog = new THREE.Fog(0x1e1614, 40, 90);
+  // Sky color, fog, and exposure live in Game.tuneLights so a warm
+  // interior cannot clobber the visible courtyard, and vice versa.
 
   return {
     group, obstacles, cushions: null, cushionMats: new Float32Array(0),
@@ -490,9 +489,9 @@ function buildFacade(
   g.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, -W / 2, H / 2, 0));
   g.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, W / 2, H / 2, 0));
   const leaf = (W - doorW) / 2;
-  g.add(M(new THREE.BoxGeometry(leaf, H, 0.32), verm, -(W / 2 - leaf / 2), H / 2, frontZ));
-  g.add(M(new THREE.BoxGeometry(leaf, H, 0.32), verm, (W / 2 - leaf / 2), H / 2, frontZ));
-  g.add(M(new THREE.BoxGeometry(doorW + 0.2, H - doorH, 0.36), verm, 0, doorH + (H - doorH) / 2, frontZ));
+  g.add(paintedWall(leaf, H, 0.32, -(W / 2 - leaf / 2), H / 2, frontZ));
+  g.add(paintedWall(leaf, H, 0.32, (W / 2 - leaf / 2), H / 2, frontZ));
+  g.add(paintedWall(doorW + 0.2, H - doorH, 0.36, 0, doorH + (H - doorH) / 2, frontZ));
   g.add(M(new THREE.CylinderGeometry(0.16, 0.16, H, 10), verm, -doorW / 2, H / 2, frontZ + 0.1));
   g.add(M(new THREE.CylinderGeometry(0.16, 0.16, H, 10), verm, doorW / 2, H / 2, frontZ + 0.1));
   addOpenLatticeDoors(g, doorW, doorH, frontZ + 0.02, true);
@@ -549,7 +548,7 @@ function createPine(x: number, z: number) {
 }
 
 /** Hall interior: mural walls, dark wood floor, tall gilt deity, 50 square cushions. */
-export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
+export function buildInterior(_scene: THREE.Scene, def: HallDef): HallObjects {
   const main = def.id === "main";
   const group = new THREE.Group();
   const obstacles: Obstacle[] = [];
@@ -742,8 +741,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
   }
 
   // Caller attaches the group (allows off-screen warmup).
-  scene.background = new THREE.Color(0x140f0e);
-  scene.fog = new THREE.Fog(0x140f0e, 22, 48);
+  // Background and fog are applied in Game.tuneLights.
 
   return {
     group, obstacles, cushions, cushionMats: mats,

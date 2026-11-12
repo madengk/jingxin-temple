@@ -4,6 +4,7 @@ import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer
 import { Client, Room } from "colyseus.js";
 import { Monk, preloadMonks } from "./scene/monk";
 import { buildCourtyard, buildInterior, resolveMove, setCushionOccupied, type HallObjects } from "./scene/hall";
+import { SUN_POS, DAY_HORIZON, DAY_FOG } from "./scene/exteriorArt";
 import { IncenseField } from "./scene/incenseViz";
 import { makeNametag } from "./scene/fx";
 import { MuyuPanel, BeadsPanel } from "./scene/tools";
@@ -79,6 +80,8 @@ export class Game {
   private sun!: THREE.DirectionalLight;
   private spot!: THREE.SpotLight;
   private fill!: THREE.DirectionalLight;
+  private hemi!: THREE.HemisphereLight;
+  private ambient!: THREE.AmbientLight;
 
   constructor(audio: TempleAudio) {
     this.audio = audio;
@@ -282,12 +285,13 @@ export class Game {
   }
 
   private setupLights() {
-    const hemi = new THREE.HemisphereLight(0xffe0c0, 0x2a1810, 0.42);
-    this.scene.add(hemi);
-    this.scene.add(new THREE.AmbientLight(0x4a3020, 0.38));
+    this.hemi = new THREE.HemisphereLight(0x9ec5ee, 0xd9c3a0, 1.05);
+    this.scene.add(this.hemi);
+    this.ambient = new THREE.AmbientLight(0xfff0d8, 0.68);
+    this.scene.add(this.ambient);
 
-    this.sun = new THREE.DirectionalLight(0xffd0a8, 0.75);
-    this.sun.position.set(-10, 22, -18);
+    this.sun = new THREE.DirectionalLight(0xffe6b8, 2.15);
+    this.sun.position.copy(SUN_POS);
     this.sun.castShadow = true;
     this.sun.shadow.mapSize.set(1536, 1536);
     this.sun.shadow.camera.left = -30;
@@ -295,7 +299,7 @@ export class Game {
     this.sun.shadow.camera.top = 32;
     this.sun.shadow.camera.bottom = -18;
     this.sun.shadow.camera.near = 2;
-    this.sun.shadow.camera.far = 80;
+    this.sun.shadow.camera.far = 100;
     this.sun.shadow.bias = -0.0007;
     this.scene.add(this.sun);
 
@@ -316,17 +320,43 @@ export class Game {
 
   private tuneLights() {
     if (this.hallId === "courtyard") {
+      this.renderer.toneMappingExposure = 1.28;
+      this.scene.background = new THREE.Color(DAY_HORIZON);
+      this.scene.fog = new THREE.Fog(DAY_FOG, 55, 130);
+      this.hemi.color.setHex(0x9ec5ee);
+      this.hemi.groundColor.setHex(0xd9c3a0);
+      this.hemi.intensity = 1.05;
+      this.ambient.color.setHex(0xfff0d8);
+      this.ambient.intensity = 0.68;
+      this.sun.color.setHex(0xffe6b8);
+      this.sun.intensity = 2.15;
+      this.sun.position.copy(SUN_POS);
+      this.fill.color.setHex(0xffe8d0);
+      this.fill.intensity = 0.28;
+      this.fill.position.set(-10, 12, -8);
       this.spot.intensity = 0;
-      this.sun.intensity = 0.85;
-      this.sun.position.set(-10, 22, -18);
+      this.scene.environmentIntensity = 0.55;
     } else {
+      this.renderer.toneMappingExposure = 1.05;
+      this.scene.background = new THREE.Color(0x140f0e);
+      this.scene.fog = new THREE.Fog(0x140f0e, 22, 48);
+      this.hemi.color.setHex(0xffe0c0);
+      this.hemi.groundColor.setHex(0x2a1810);
+      this.hemi.intensity = 0.42;
+      this.ambient.color.setHex(0x4a3020);
+      this.ambient.intensity = 0.38;
+      this.sun.color.setHex(0xffd0a8);
+      this.sun.intensity = 0.45;
+      this.sun.position.set(-8, 16, 4);
+      this.fill.color.setHex(0xffe8d0);
+      this.fill.intensity = 0.32;
+      this.fill.position.set(4, 10, 6);
       this.spot.intensity = 4.6;
       const targetZ = this.hallId === "main" ? 21.4 : 16.4;
       this.spot.position.set(0, this.hallId === "main" ? 18 : 13, targetZ - 7);
       this.spot.target.position.set(0, 6, targetZ);
       this.spot.target.updateMatrixWorld();
-      this.sun.intensity = 0.45;
-      this.sun.position.set(-8, 16, 4);
+      this.scene.environmentIntensity = 0.42;
     }
   }
 
