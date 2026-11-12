@@ -38,7 +38,9 @@ function M(geo: THREE.BufferGeometry, material: THREE.Material, x = 0, y = 0, z 
   return m;
 }
 
+let _darkPlank: THREE.CanvasTexture | null = null;
 function darkPlankTex(w = 512, h = 512): THREE.CanvasTexture {
+  if (_darkPlank) return _darkPlank;
   const c = document.createElement("canvas");
   c.width = w; c.height = h;
   const g = c.getContext("2d")!;
@@ -75,10 +77,13 @@ function darkPlankTex(w = 512, h = 512): THREE.CanvasTexture {
   t.repeat.set(8, 14);
   t.anisotropy = 8;
   t.rotation = 0;
+  _darkPlank = t;
   return t;
 }
 
+let _stone: THREE.CanvasTexture | null = null;
 function stoneTex(): THREE.CanvasTexture {
+  if (_stone) return _stone;
   const c = document.createElement("canvas");
   c.width = 512; c.height = 512;
   const g = c.getContext("2d")!;
@@ -95,6 +100,7 @@ function stoneTex(): THREE.CanvasTexture {
   t.colorSpace = THREE.SRGBColorSpace;
   t.wrapS = t.wrapT = THREE.RepeatWrapping;
   t.repeat.set(12, 14);
+  _stone = t;
   return t;
 }
 
@@ -389,7 +395,7 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   }
   obstacles.push({ x: -doorW / 2, z: frontZ + 0.12, r: 0.42 }, { x: doorW / 2, z: frontZ + 0.12, r: 0.42 });
   addOpenLatticeDoors(group, doorW, doorH, frontZ + 0.06, false);
-  const backMural = muralTexture(hash("main-facade"), 2048, 1536);
+  const backMural = muralTexture(hash("main-facade"), 1024, 768);
   const mural = M(
     new THREE.PlaneGeometry(hallW * 0.9, wallH * 0.86),
     new THREE.MeshStandardMaterial({ map: backMural, roughness: 0.78, metalness: 0.04 }),
@@ -451,7 +457,7 @@ export function buildCourtyard(scene: THREE.Scene): HallObjects {
   moon.position.set(-16, 22, -48);
   group.add(moon);
 
-  scene.add(group);
+  // Caller attaches the group (allows off-screen warmup).
   scene.background = new THREE.Color(0x1c1520);
   scene.fog = new THREE.Fog(0x1e1614, 40, 90);
 
@@ -492,7 +498,7 @@ function buildFacade(
   addOpenLatticeDoors(g, doorW, doorH, frontZ + 0.02, true);
   const mural = M(
     new THREE.PlaneGeometry(W * 0.88, H * 0.82),
-    new THREE.MeshStandardMaterial({ map: muralTexture(hash(h.id + "-facade"), 1024, 768), roughness: 0.8, metalness: 0.04 }),
+    new THREE.MeshStandardMaterial({ map: muralTexture(hash(h.id + "-facade"), 768, 576), roughness: 0.8, metalness: 0.04 }),
     0, H * 0.5, backZ + 0.18,
   );
   mural.castShadow = false;
@@ -579,7 +585,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
   group.add(inPlaque);
 
   // Murals — back wall fully covered, sides similarly patterned
-  const backMural = muralTexture(hash(def.id), 2048, 1536);
+  const backMural = muralTexture(hash(def.id), 1024, 768);
   const backH = wallH * 0.88;
   const backPlane = M(
     new THREE.PlaneGeometry(hallW * 0.92, backH),
@@ -589,7 +595,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
   backPlane.rotation.y = Math.PI;
   backPlane.castShadow = false;
   group.add(backPlane);
-  const sideM = sideMuralTexture(hash(def.id) + 9, 1024, 1024);
+  const sideM = sideMuralTexture(hash(def.id) + 9, 512, 512);
   sideM.repeat.set(1, 1);
   for (const sx of [-1, 1]) {
     const p = M(
@@ -735,7 +741,7 @@ export function buildInterior(scene: THREE.Scene, def: HallDef): HallObjects {
     group.add(L);
   }
 
-  scene.add(group);
+  // Caller attaches the group (allows off-screen warmup).
   scene.background = new THREE.Color(0x140f0e);
   scene.fog = new THREE.Fog(0x140f0e, 22, 48);
 

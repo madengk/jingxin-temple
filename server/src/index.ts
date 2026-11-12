@@ -44,7 +44,17 @@ app.get("/presence", async (_req, res) => {
   }
 });
 
-app.use(express.static(dist, { fallthrough: true, index: false }));
+app.use(express.static(dist, {
+  fallthrough: true,
+  index: false,
+  setHeaders(res, filePath) {
+    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+      res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
+    } else if (/\.(glb|gltf|png|webp|jpe?g|ogg|m4a|mp3|woff2)$/i.test(filePath)) {
+      res.setHeader("Cache-Control", "public, max-age=604800");
+    }
+  },
+}));
 
 app.get("*", (req, res, next) => {
   if (req.path.startsWith("/matchmake") || req.path.startsWith("/colyseus")) {
