@@ -42,12 +42,14 @@ async function main() {
   const tag = String(Date.now() % 100000);
   const n1 = `试僧甲${tag}`;
   const n2 = `试僧乙${tag}`;
+  const open: Room[] = [];
 
   const c1 = new Client(URL);
   const c2 = new Client(URL);
 
   const r1 = await c1.joinOrCreate("main_hall", { name: n1 });
   const r2 = await c2.joinOrCreate("main_hall", { name: n2 });
+  open.push(r1, r2);
   await sleep(250);
 
   // 1. both online, unique looks assigned, names visible
@@ -148,6 +150,7 @@ async function main() {
     const yc2 = new Client(URL);
     const y1 = await yc1.joinOrCreate("courtyard", { name: n1 + "香" });
     const y2 = await yc2.joinOrCreate("courtyard", { name: n2 + "香" });
+    open.push(y1, y2);
     await sleep(200);
     const { INCENSE_BURNER } = await import("../server/src/shared.ts");
     await walkTo(y1, INCENSE_BURNER.x, INCENSE_BURNER.z - 1.0);
@@ -160,6 +163,7 @@ async function main() {
 
     // 7. side hall is its own Colyseus room
     const g1 = await new Client(URL).joinOrCreate("hall_guanyin", { name: n1 + "观" });
+    open.push(g1);
     await sleep(150);
     const inHall = g1.state.hallId === "guanyin" && g1.state.cushions.length === 50;
     results.push({ name: "side-hall room", ok: inHall, detail: `hallId=${g1.state.hallId} cushions=${g1.state.cushions.length}` });
@@ -172,6 +176,9 @@ async function main() {
   for (const r of results) {
     console.log(`${r.ok ? "PASS" : "FAIL"}  ${r.name}  — ${r.detail}`);
   }
+  for (const room of open) {
+    try { await room.leave(); } catch { /* already left */ }
+  }
   if (failed.length) {
     console.error(`\n${failed.length} failed`);
     process.exit(1);
@@ -179,7 +186,7 @@ async function main() {
   console.log("\nAll sync tests passed.");
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error("FATAL", e);
   process.exit(1);
 });

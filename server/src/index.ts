@@ -5,7 +5,7 @@ import express from "express";
 import cors from "cors";
 import colyseus from "colyseus";
 import wst from "@colyseus/ws-transport";
-const { Server } = colyseus;
+const { Server, matchMaker } = colyseus;
 const { WebSocketTransport } = wst;
 import { HallRoom } from "./rooms/HallRoom";
 import { SIDE_HALLS } from "./shared";
@@ -27,6 +27,23 @@ app.get("/health", (_req, res) => {
   });
 });
 
+/** Player counts only — used to confirm a hall is empty without joining it. */
+app.get("/presence", async (_req, res) => {
+  try {
+    const rooms = await matchMaker.query({});
+    res.json({
+      ok: true,
+      rooms: rooms.map((r) => ({
+        name: r.name,
+        roomId: r.roomId,
+        clients: r.clients,
+      })),
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: String((err as Error).message ?? err) });
+  }
+});
+
 app.use(express.static(dist, { fallthrough: true, index: false }));
 
 app.get("*", (req, res, next) => {
@@ -40,7 +57,7 @@ app.get("*", (req, res, next) => {
 
 const httpServer = createServer(app);
 const gameServer = new Server({
-  transport: new WebSocketTransport({ server: httpServer }),
+  transport: new WebSocketTransport({ server: httpServer, pingInterval: 4000, pingMaxRetries: 3 }),
 });
 
 // One singleton room per hall. filterBy is unnecessary — each has its own name.

@@ -39,6 +39,9 @@ export class HallRoom extends Room<HallState> {
 
   onCreate() {
     this.hallId = hallIdOf(this.roomName);
+    this.autoDispose = true;
+    // Do not allowReconnection: a dropped socket must vanish immediately so
+    // no ghost monk is left sitting after a tab close or a crashed test client.
     const state = new HallState();
     state.hallId = this.hallId;
     this.setState(state);

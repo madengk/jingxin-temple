@@ -1,32 +1,23 @@
 # 静心寺 · 运行与部署状态
 
-更新时间：2026-11-12 15:55（Asia/Shanghai）
+更新时间：2026-11-12 19:20（Asia/Shanghai）
 
-## 本轮（round 2）
+## 本轮（round 8）
 
-- 主殿造像按汉传仪轨重做（原创程序几何与彩绘，非某寺实景复制）：如来结跏趺坐禅定印；四大天王持琵琶 / 宝剑 / 龙蛇 / 宝伞；韦陀横担降魔杵。每尊像前有朱红描金神位牌。侧殿十尊未做（fal 额度用尽，本轮不以扫描顶替坐像）。
-- 背景音乐为原创合成的《大悲咒》诵念（经文公有领域，录音为项目原创，非商业唱片），入寺点击后循环；打坐时继续播放。见 `docs/LICENSES.md`。
-- 键盘 WASD / 方向键为坦克式：A/D 转向（镜头随角色转），W/S 沿面向走；鼠标拖曳仍可绕转；触屏摇杆保留。
-- 本地已 `npm run build`、`npm run test:sync`（全部通过），截图在 `screenshots/round2-*.png`。
+- 庭院各大殿正面改为朱红柱 + 敞开格扇门，从外面可以看见殿内点亮的金身主尊；去掉封死门洞的白墙。
+- 删除客户端装饰打坐僧（`addWorshippers`）。殿内蒲团只会出现真实在线并已打坐的玩家。线上核查时各殿服务端玩家列表为空（除观察者自己），坐着的人是本地装饰网格，不是残留会话。
+- 服务端关闭断线重连，WebSocket 心跳 4 秒 / 最多 3 次失败后移除；`GET /presence` 可查各房人数。同步测试结束时必定 leave。
+- 《大悲咒》未换到真实唱诵：Wikimedia Commons、Internet Archive（含 CC/公有领域过滤）、Openverse 等均无许可明确的汉传《大悲咒》录音。仍使用原创合成音轨，首次交互后循环；详见 `docs/LICENSES.md`。标识：`<html data-version="round8-20261112">`。
 
 ## 本地服务
 
-- `http://localhost:2567`（`npm start`）
-- 健康检查：`GET /health`
-- 监听 `process.env.PORT`（默认 2567），绑定 `0.0.0.0`；客户端同源连接，HTTPS 下用 `wss`。
+- `http://localhost:2567`（`PORT=2567 TUNNEL=0 bash scripts/start.sh`）
+- 健康检查：`GET /health`；人数：`GET /presence`
 
 ## 公网
 
-https://jingxin-temple.onrender.com （Render 免费 Web Service，推送 `main` 自动部署）。标识：页面 `<html data-version="round2-20261112">`。
+https://jingxin-temple.onrender.com （Render 免费 Web Service。推送 `main` 后用 Deploy Hook 触发部署。）
 
 ## 仓库
 
 `https://github.com/madengk/jingxin-temple`
-
-## 启停（本地）
-
-```bash
-cd /workspace/jingxin-temple
-npm ci && npm run build
-PORT=2567 npm start
-```

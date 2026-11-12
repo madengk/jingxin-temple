@@ -1,11 +1,11 @@
 /**
  * Audio for 静心寺.
  *
- * - BGM: original formant-synthesis recitation of 《大悲咒》
- *   (千手千眼观世音菩萨广大圆满无碍大悲心陀罗尼). The mantra text is
- *   public domain; the recording is an original work (not a copy of any
- *   commercial or temple recording), looped seamlessly, started after the
- *   first user gesture. See docs/LICENSES.md.
+ * - BGM: 《大悲咒》 (千手千眼观世音菩萨广大圆满无碍大悲心陀罗尼).
+ *   A licensed real monastic chant was not available (see docs/LICENSES.md);
+ *   the current file is the project's earlier original formant-synthesis
+ *   recitation, looped after the first user gesture. Prefers /audio/dabei-zhou.ogg
+ *   and falls back to .m4a / .mp3 for iOS Safari.
  * - During meditation the 大悲咒 continues (slightly calmer); no substitute chant.
  * - Wooden fish & bead clicks: procedurally generated one-shots (original).
  */
@@ -137,9 +137,7 @@ export class TempleAudio {
     // Quiet drone bed under the recitation (also a fallback if the file fails).
     this.startSoftDrone(0.28);
     try {
-      const res = await fetch("/audio/dabei-zhou.ogg");
-      if (!res.ok) throw new Error("dabei http " + res.status);
-      const arr = await res.arrayBuffer();
+      const arr = await fetchDabeiBytes();
       this.dabeiBuf = await ctx.decodeAudioData(arr.slice(0));
     } catch (err) {
       console.warn("大悲咒 audio unavailable, using drone only", err);
@@ -408,6 +406,22 @@ export class TempleAudio {
     g.connect(dest ?? this.sfxGain);
     src.start();
   }
+}
+
+
+async function fetchDabeiBytes(): Promise<ArrayBuffer> {
+  const paths = ["/audio/dabei-zhou.ogg", "/audio/dabei-zhou.m4a", "/audio/dabei-zhou.mp3"];
+  let last = "no candidates";
+  for (const path of paths) {
+    try {
+      const res = await fetch(path);
+      if (!res.ok) { last = path + " http " + res.status; continue; }
+      return await res.arrayBuffer();
+    } catch (err) {
+      last = path + " " + String(err);
+    }
+  }
+  throw new Error("dabei fetch failed: " + last);
 }
 
 function makeNoiseSource(ctx: AudioContext, seconds: number): AudioBufferSourceNode {

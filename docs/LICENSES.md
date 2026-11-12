@@ -147,3 +147,27 @@
 入殿默认采用 **Hunyuan 3D Pro**（衣纹、背光褶、螺髻与禅定印都更完整），复制为 `client/public/statues/fal/shakyamuni.glb`，并保留其金身反照率与 PBR 贴图（不再套用纯色金身材质）。馆藏扫描仍可通过 `?gilt=scan` 对照。原始未压缩 GLB 不进 Git（见 `.gitignore`）。
 
 本轮代码在分支 `round7-fal`，**未推送 main，也未要求 Render 部署**。
+
+## Round 8 — 殿门开敞、去掉装饰僧、大悲咒音源核查
+
+### 殿门与装饰僧
+
+庭院里各大殿正面改为朱红柱与敞开的格扇门，门洞不再被白墙封死，从外面可以看见殿内点亮的金身主尊与壁画。殿内不再放置任何装饰用的打坐小和尚；蒲团上只会出现真实在线、并且已经打坐的玩家。服务端不为断线会话保留重连，WebSocket 心跳约 4 秒一次，连续三次无响应即移除该玩家。
+
+### 背景音乐《大悲咒》
+
+本轮按「真实唱诵、且许可明确可商用」的标准检索了 Wikimedia Commons、Internet Archive（含 licenseurl 为 Creative Commons / Public Domain 的条目）、Openverse，并核对 Freesound / FMA 检索结果。**没有找到**符合要求的汉传寺院或居士唱诵《大悲咒》（Nīlakaṇṭha Dhāraṇī / Great Compassion Mantra）录音。因此 **没有替换** `client/public/audio/dabei-zhou.ogg`，仍使用前轮原创共振峰合成音轨（经文本身为公有领域，录音为项目原创，可商用），并在首次用户交互后循环播放。客户端会依次尝试 `.ogg` / `.m4a` / `.mp3`，便于以后换上合法录音后在 iOS Safari 上回退。
+
+核查过、但**不能采用**的候选：
+
+| 候选 | 地址 | 不采用原因 |
+|------|------|------------|
+| Wikimedia Commons 佛教唱诵音频分类 | https://commons.wikimedia.org/wiki/Category:Audio_files_of_Buddhist_chants | 有汉传《心经》居士诵（CC0），**没有**《大悲咒》音频 |
+| Internet Archive 条目 *buddhamantra* 中的「大悲咒」 | https://archive.org/details/buddhamantra | 无 licenseurl，上传者标为 monks，无法确认权利 |
+| Tinna Tinh「Chú Đại Bi / 大悲咒」冥想音乐（两份相同条目） | https://archive.org/details/nhac-thien-meditation-music-chu-dai-bi-1-hour-tinna-tinh | 无 licenseurl，权利不明 |
+| siddham.org 悉昙古音《大悲咒》偈诵 | https://www.siddham.org/download/mantra_download.html | 仅有「欢迎自制 CD、广传流布」的流通说明，不是 CC0 / CC-BY / CC-BY-SA |
+| 平安抄经「大悲咒梵音及粤语读诵」 | https://peacewriting.com/licenses.html | 站点写明该授权仅限该站使用，**禁止另行转载** |
+| 黄慧音、海涛法师、各寺院课诵等商业或未授权转载 | 各流媒体与佛学资料站 | 版权录音，不可嵌入网站或即将上架的 App |
+| 宣化上人相关 CC-BY-SA 音频（Internet Archive） | 例如 https://archive.org/details/Shurangama_Mantra_000_Lines_001-9_Refuge_Buddhism | 许可可用，但是《楞严咒》讲解/唱诵，**不是**《大悲咒》 |
+
+若之后获得一首许可明确（CC0 / CC-BY / CC-BY-SA 或公有领域）的汉传《大悲咒》唱诵，或权利人书面授权，即可替换该音轨并更新本页与界面致谢。
