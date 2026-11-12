@@ -253,11 +253,14 @@ export function buildHall(scene: THREE.Scene): HallObjects {
   group.add(buddha);
   obstacles.push({ x: 0, z: 21.6, r: 2.6 });
 
+  // When facing the Buddha (looking +Z), Three.js lookAt puts world −X on
+  // screen-right. Worshippers facing north have east on their right, so the
+  // eastern kings (持国、增长) sit at x = −13 (screen right) and face inward (+X).
   const kingPlaces = [
-    { i: 0, x: 13.0, z: 8, rot: -Math.PI / 2 },
-    { i: 1, x: 13.0, z: 16, rot: -Math.PI / 2 },
-    { i: 2, x: -13.0, z: 8, rot: Math.PI / 2 },
-    { i: 3, x: -13.0, z: 16, rot: Math.PI / 2 },
+    { i: 0, x: -13.0, z: 8, rot: -Math.PI / 2 },  // 东方持国天王 · 琵琶
+    { i: 1, x: -13.0, z: 16, rot: -Math.PI / 2 }, // 南方增长天王 · 宝剑
+    { i: 2, x: 13.0, z: 8, rot: Math.PI / 2 },    // 西方广目天王 · 龙/蛇
+    { i: 3, x: 13.0, z: 16, rot: Math.PI / 2 },   // 北方多闻天王 · 宝伞
   ];
   for (const k of kingPlaces) {
     const kg = createHeavenlyKing(k.i);

@@ -1,10 +1,13 @@
 /**
- * All audio is synthesized in WebAudio at runtime.
- * License: original work, commercially usable, no third-party recordings.
+ * Audio for 静心寺.
  *
- * - Temple BGM: low drone + singing-bowl partials + sparse guqin/flute phrases
- * - Meditation chant: vocal-like formant drone + soft qing bell; BGM ducks
- * - Wooden fish & bead clicks: procedurally generated one-shots
+ * - BGM: original formant-synthesis recitation of 《大悲咒》
+ *   (千手千眼观世音菩萨广大圆满无碍大悲心陀罗尼). The mantra text is
+ *   public domain; the recording is an original work (not a copy of any
+ *   commercial or temple recording), looped seamlessly, started after the
+ *   first user gesture. See docs/LICENSES.md.
+ * - During meditation the 大悲咒 continues (slightly calmer); no substitute chant.
+ * - Wooden fish & bead clicks: procedurally generated one-shots (original).
  */
 
 const VOL_KEY = "jingxin_volume";
@@ -27,7 +30,10 @@ export class TempleAudio {
   private bgmTimer = 0;
   private chantNodes: AudioNode[] = [];
   private bgmNodes: AudioNode[] = [];
+  private dabeiBuf: AudioBuffer | null = null;
+  private dabeiSrc: AudioBufferSourceNode | null = null;
   private started = false;
+  private startingBgm = false;
   sitting = false;
   muted = localStorage.getItem(MUTE_KEY) === "1";
   volume = loadVol();
@@ -46,10 +52,13 @@ export class TempleAudio {
   }
 
   private tryStartBgm() {
-    if (!this.ctx || this.started) return;
+    if (!this.ctx || this.started || this.startingBgm) return;
     if (this.ctx.state !== "running") return;
-    this.startBgm();
-    this.started = true;
+    this.startingBgm = true;
+    void this.startBgm().finally(() => {
+      this.started = true;
+      this.startingBgm = false;
+    });
   }
 
   setVolume(v: number) {
@@ -76,22 +85,9 @@ export class TempleAudio {
     if (!this.ctx || !this.started) return;
     const t = this.ctx.currentTime;
     this.bgmGain.gain.cancelScheduledValues(t);
-    this.chantGain.gain.cancelScheduledValues(t);
-    if (v) {
-      this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, t);
-      this.bgmGain.gain.linearRampToValueAtTime(0.14, t + 1.6);
-      this.startChant();
-      this.chantGain.gain.setValueAtTime(this.chantGain.gain.value, t);
-      this.chantGain.gain.linearRampToValueAtTime(0.85, t + 1.8);
-    } else {
-      this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, t);
-      this.bgmGain.gain.linearRampToValueAtTime(1, t + 1.6);
-      this.chantGain.gain.setValueAtTime(this.chantGain.gain.value, t);
-      this.chantGain.gain.linearRampToValueAtTime(0, t + 1.4);
-      window.setTimeout(() => {
-        if (!this.sitting) this.stopChant();
-      }, 1600);
-    }
+    // Keep 大悲咒 throughout meditation; just settle a little quieter.
+    this.bgmGain.gain.setValueAtTime(this.bgmGain.gain.value, t);
+    this.bgmGain.gain.linearRampToValueAtTime(v ? 0.82 : 1, t + 1.4);
   }
 
   playMuyu() {
@@ -136,13 +132,47 @@ export class TempleAudio {
     ctx.onstatechange = () => this.tryStartBgm();
   }
 
-  private startBgm() {
+  private async startBgm() {
+    const ctx = this.ctx!;
+    // Quiet drone bed under the recitation (also a fallback if the file fails).
+    this.startSoftDrone(0.28);
+    try {
+      const res = await fetch("/audio/dabei-zhou.ogg");
+      if (!res.ok) throw new Error("dabei http " + res.status);
+      const arr = await res.arrayBuffer();
+      this.dabeiBuf = await ctx.decodeAudioData(arr.slice(0));
+    } catch (err) {
+      console.warn("大悲咒 audio unavailable, using drone only", err);
+      this.startLegacyPhrases();
+      return;
+    }
+    this.playDabeiLoop();
+  }
+
+  private playDabeiLoop() {
+    if (!this.ctx || !this.dabeiBuf) return;
+    if (this.dabeiSrc) {
+      try { this.dabeiSrc.stop(); this.dabeiSrc.disconnect(); } catch { /* already stopped */ }
+    }
+    const src = this.ctx.createBufferSource();
+    src.buffer = this.dabeiBuf;
+    src.loop = true;
+    src.loopStart = 0;
+    src.loopEnd = this.dabeiBuf.duration;
+    const g = this.ctx.createGain();
+    g.gain.value = 0.95;
+    src.connect(g);
+    g.connect(this.bgmGain);
+    src.start();
+    this.dabeiSrc = src;
+    this.bgmNodes.push(src, g);
+  }
+
+  private startSoftDrone(scale: number) {
     const ctx = this.ctx!;
     const dest = this.bgmGain;
-
-    // Warm low drone (several detuned partials)
     const droneFreqs = [73.4, 73.9, 110.0, 110.6, 146.8, 220.0];
-    const droneGains = [0.12, 0.1, 0.09, 0.07, 0.045, 0.03];
+    const droneGains = [0.12, 0.1, 0.09, 0.07, 0.045, 0.03].map((v) => v * scale);
     droneFreqs.forEach((f, i) => {
       const osc = ctx.createOscillator();
       osc.type = "sine";
@@ -166,11 +196,9 @@ export class TempleAudio {
       lfo.start();
       this.bgmNodes.push(osc, lfo, g, lp);
     });
-
-    // Soft air / room tone
     const noise = makeNoiseSource(ctx, 2);
     const ng = ctx.createGain();
-    ng.gain.value = 0.035;
+    ng.gain.value = 0.02 * scale;
     const nlp = ctx.createBiquadFilter();
     nlp.type = "lowpass";
     nlp.frequency.value = 480;
@@ -179,8 +207,9 @@ export class TempleAudio {
     ng.connect(dest);
     noise.start();
     this.bgmNodes.push(noise, ng, nlp);
+  }
 
-    // Sparse ceremonial events
+  private startLegacyPhrases() {
     const tick = () => {
       if (!this.ctx || !this.started) return;
       const roll = Math.random();

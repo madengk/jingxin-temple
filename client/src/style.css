@@ -261,6 +261,22 @@ h1 {
   left: 36px; top: 36px;
 }
 
+#credits {
+  position: absolute;
+  left: calc(14px + var(--safe-l));
+  bottom: calc(12px + var(--safe-b));
+  max-width: min(460px, 44vw);
+  font-size: 11px;
+  line-height: 1.45;
+  color: rgba(232, 213, 163, 0.62);
+  letter-spacing: 0.04em;
+  text-shadow: 0 1px 3px rgba(0,0,0,0.7);
+  pointer-events: none;
+}
+@media (max-width: 640px) {
+  #credits { bottom: calc(165px + var(--safe-b)); max-width: 70vw; font-size: 10px; }
+}
+
 .nametag {
   color: #f3e6c8;
   font-family: "Noto Serif SC", "Songti SC", serif;

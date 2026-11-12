@@ -74,35 +74,28 @@ export class Controls {
     this.joyKnob.style.top = `${36 + dy}px`;
   }
 
-  /** Camera-relative XZ movement request, length 0..1. */
-  moveAxis(camYaw: number): { x: number; z: number; moving: boolean } {
-    let ix = 0;
-    let iz = 0;
-    if (this.keys.has("w") || this.keys.has("arrowup")) iz += 1;
-    if (this.keys.has("s") || this.keys.has("arrowdown")) iz -= 1;
-    if (this.keys.has("a") || this.keys.has("arrowleft")) ix -= 1;
-    if (this.keys.has("d") || this.keys.has("arrowright")) ix += 1;
+  /**
+   * Third-person tank-style intent:
+   * W/S (or up/down, joystick vertical) = forward / back along facing;
+   * A/D (or left/right, joystick horizontal) = turn in place.
+   * Returns forward and turn in -1..1.
+   */
+  moveIntent(): { forward: number; turn: number; walking: boolean } {
+    let forward = 0;
+    let turn = 0;
+    if (this.keys.has("w") || this.keys.has("arrowup")) forward += 1;
+    if (this.keys.has("s") || this.keys.has("arrowdown")) forward -= 1;
+    if (this.keys.has("a") || this.keys.has("arrowleft")) turn += 1;
+    if (this.keys.has("d") || this.keys.has("arrowright")) turn -= 1;
     if (this.joy.active) {
-      ix += this.joy.x;
-      iz += -this.joy.y;
+      forward += -this.joy.y;
+      turn += -this.joy.x;
     }
-    const len = Math.hypot(ix, iz);
-    if (len > 1) {
-      ix /= len;
-      iz /= len;
-    }
-    if (len < 0.08 && !this.dest) return { x: 0, z: 0, moving: false };
-    if (len >= 0.08) {
-      const c = Math.cos(camYaw);
-      const s = Math.sin(camYaw);
-      // forward is -Z of camera yaw? Camera looks at player from behind.
-      // If camYaw is the yaw of the camera looking direction (towards +Z default 0),
-      // forward world = (sin(yaw), cos(yaw)) when yaw 0 looks +Z.
-      const fx = s * iz + c * ix;
-      const fz = c * iz - s * ix;
-      return { x: fx, z: fz, moving: true };
-    }
-    return { x: 0, z: 0, moving: false };
+    if (Math.abs(forward) < 0.08) forward = 0;
+    if (Math.abs(turn) < 0.08) turn = 0;
+    if (Math.abs(forward) > 1) forward = Math.sign(forward);
+    if (Math.abs(turn) > 1) turn = Math.sign(turn);
+    return { forward, turn, walking: forward !== 0 };
   }
 
   dispose() {

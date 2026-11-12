@@ -65,6 +65,7 @@ export class Game {
   private myName = "";
   private raycaster = new THREE.Raycaster();
   private ndc = new THREE.Vector2();
+  private camFrozen: { x: number; y: number; z: number; lx: number; ly: number; lz: number } | null = null;
 
   constructor(audio: TempleAudio) {
     this.audio = audio;
@@ -108,6 +109,14 @@ export class Game {
     this.myName = name;
     document.getElementById("my-name")!.textContent = name;
 
+    await Promise.race([
+      document.fonts.ready,
+      new Promise<void>((r) => setTimeout(r, 1600)),
+    ]);
+    try {
+      await document.fonts.load('bold 96px "Noto Serif SC"');
+      await document.fonts.load('bold 96px "Noto Serif CJK SC"');
+    } catch { /* system fallback is fine */ }
     this.setupScene();
     this.bindRoom();
     this.running = true;
@@ -117,6 +126,8 @@ export class Game {
       __JINGXIN?: {
         teleport: (x: number, z: number, rotY?: number) => void;
         sitLocal: (id: number) => void;
+        freezeCam: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => void;
+        unfreezeCam: () => void;
       };
     };
     w.__JINGXIN_READY = true;
@@ -131,6 +142,12 @@ export class Game {
         this.room?.send("move", { x, z, rotY });
       },
       sitLocal: (id) => this.room?.send("sit", { cushionId: id }),
+      freezeCam: (x, y, z, lx, ly, lz) => {
+        this.camFrozen = { x, y, z, lx, ly, lz };
+        this.camera.position.set(x, y, z);
+        this.camera.lookAt(lx, ly, lz);
+      },
+      unfreezeCam: () => { this.camFrozen = null; },
     };
   }
 
@@ -385,13 +402,24 @@ export class Game {
     if (!this.localMonk) return;
     let moving = false;
     if (!this.sitting) {
-      const camYaw = this.camera.rotation.y;
-      // Use camera yaw (looking direction). Three.js euler Y from lookAt.
-      const yaw = this.lookYaw();
-      const axis = this.controls.moveAxis(yaw);
-      let vx = axis.x;
-      let vz = axis.z;
-      if (!axis.moving && this.controls.dest) {
+      const intent = this.controls.moveIntent();
+      // A/D (and joystick X): turn the character; camera follows behind.
+      if (intent.turn !== 0) {
+        this.localGroup.rotation.y += intent.turn * 2.15 * dt;
+        this.controls.dest = null;
+      }
+      let vx = 0;
+      let vz = 0;
+      if (intent.walking) {
+        const face = this.localGroup.rotation.y;
+        vx = Math.sin(face) * intent.forward;
+        vz = Math.cos(face) * intent.forward;
+        this.controls.dest = null;
+        // Recenter optional mouse-orbit so the camera returns behind the back.
+        if (!this.drag) {
+          this.camYawOff = lerpAngle(this.camYawOff, 0, Math.min(1, dt * 2.2));
+        }
+      } else if (this.controls.dest) {
         const dx = this.controls.dest.x - this.localGroup.position.x;
         const dz = this.controls.dest.z - this.localGroup.position.z;
         const d = Math.hypot(dx, dz);
@@ -399,6 +427,8 @@ export class Game {
         else {
           vx = dx / d;
           vz = dz / d;
+          const face = Math.atan2(vx, vz);
+          this.localGroup.rotation.y = lerpAngle(this.localGroup.rotation.y, face, Math.min(1, dt * 8));
         }
       }
       const mag = Math.hypot(vx, vz);
@@ -413,8 +443,6 @@ export class Game {
         );
         const c = clampToWalkable(resolved.x, resolved.z);
         this.localGroup.position.set(c.x, 0, c.z);
-        const face = Math.atan2(vx / mag, vz / mag);
-        this.localGroup.rotation.y = lerpAngle(this.localGroup.rotation.y, face, Math.min(1, dt * 8));
       }
     }
     this.localMonk.update(dt, moving, this.sitting);
@@ -450,6 +478,11 @@ export class Game {
   }
 
   private updateCamera(dt: number) {
+    if (this.camFrozen) {
+      this.camera.position.set(this.camFrozen.x, this.camFrozen.y, this.camFrozen.z);
+      this.camera.lookAt(this.camFrozen.lx, this.camFrozen.ly, this.camFrozen.lz);
+      return;
+    }
     const p = this.localGroup.position;
     const face = this.localGroup.rotation.y + this.camYawOff;
     const dist = this.sitting ? this.camDist * 0.85 : this.camDist;
@@ -459,7 +492,7 @@ export class Game {
       height,
       p.z - Math.cos(face) * dist,
     );
-    const k = 1 - Math.exp(-5 * dt);
+    const k = 1 - Math.exp(-6.5 * dt);
     this.camera.position.lerp(desired, k);
     this.camPivot.lerp(new THREE.Vector3(p.x, this.sitting ? 1.15 : 1.45, p.z), k);
     this.camera.lookAt(this.camPivot);
