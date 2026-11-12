@@ -1,8 +1,8 @@
 import * as THREE from "three";
 import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment.js";
-import { CSS2DRenderer } from "three/addons/renderers/CSS2DRenderer.js";
+import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { Client, Room } from "colyseus.js";
-import { Monk } from "./scene/monk";
+import { Monk, preloadMonks } from "./scene/monk";
 import { buildCourtyard, buildInterior, resolveMove, setCushionOccupied, type HallObjects } from "./scene/hall";
 import { IncenseField } from "./scene/incenseViz";
 import { makeNametag } from "./scene/fx";
@@ -24,6 +24,7 @@ export function serverUrl(): string {
 interface Remote {
   monk: Monk;
   group: THREE.Group;
+  tag: CSS2DObject;
   tx: number; tz: number; trot: number;
   sitting: boolean; moving: boolean;
 }
@@ -48,6 +49,7 @@ export class Game {
   private muyuPanel: MuyuPanel;
   private beads: BeadsPanel;
   private localMonk: Monk | null = null;
+  private localTag: CSS2DObject | null = null;
   private localGroup = new THREE.Group();
   private remotes = new Map<string, Remote>();
   private sessionId = "";
@@ -104,6 +106,7 @@ export class Game {
     this.resize();
     this.bindInput();
     this.installHooks();
+    void preloadMonks();
   }
 
   async connect(name: string): Promise<void> {
@@ -252,24 +255,33 @@ export class Game {
     const addPlayer = (p: PlayerView, id: string) => {
       if (id === this.sessionId) {
         this.myLook = p.look;
-        this.localMonk = new Monk(p.look);
-        this.localGroup.add(this.localMonk.group);
-        this.localGroup.add(makeNametag(p.name, true));
-        this.localGroup.position.set(p.x, 0, p.z);
-        this.localGroup.rotation.y = p.rotY;
         this.sitting = p.sitting;
         this.audio.setSitting(this.sitting);
+        // Colyseus may fire onAdd for players already visited by forEach;
+        // never attach a second local mesh.
+        if (this.localMonk) {
+          this.localGroup.position.set(p.x, 0, p.z);
+          this.localGroup.rotation.y = p.rotY;
+          return;
+        }
+        this.localMonk = new Monk(p.look);
+        this.localGroup.add(this.localMonk.group);
+        this.localTag = makeNametag(p.name, true);
+        this.localGroup.add(this.localTag);
+        this.localGroup.position.set(p.x, 0, p.z);
+        this.localGroup.rotation.y = p.rotY;
         return;
       }
       if (this.remotes.has(id)) return;
       const monk = new Monk(p.look);
       const group = new THREE.Group();
-      group.add(monk.group, makeNametag(p.name, false));
+      const tag = makeNametag(p.name, false);
+      group.add(monk.group, tag);
       group.position.set(p.x, 0, p.z);
       group.rotation.y = p.rotY;
       this.scene.add(group);
       this.remotes.set(id, {
-        monk, group, tx: p.x, tz: p.z, trot: p.rotY,
+        monk, group, tag, tx: p.x, tz: p.z, trot: p.rotY,
         sitting: p.sitting, moving: false,
       });
     };
@@ -532,6 +544,7 @@ export class Game {
       }
     }
     this.localMonk.update(dt, moving, this.sitting);
+    if (this.localTag) this.localTag.position.y = this.localMonk.crownY();
 
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / 15 && this.room && !this.leaving) {
@@ -553,6 +566,7 @@ export class Game {
       const dist = Math.hypot(r.tx - r.group.position.x, r.tz - r.group.position.z);
       r.moving = dist > 0.04 && !r.sitting;
       r.monk.update(dt, r.moving, r.sitting);
+      r.tag.position.y = r.monk.crownY();
     });
   }
 
@@ -646,6 +660,9 @@ export class Game {
       seedIncense: (n?: number, burnerId?: string) => void;
       hallId: () => string;
       statuesReady: () => Promise<void>;
+      setAnim: (opts: { moving?: boolean | null; sitting?: boolean | null; phase?: number | null }) => void;
+      sitOnCushion: (id?: number) => void;
+      playerPose: () => { x: number; y: number; z: number; rotY: number; headY: number };
     };
     w.freezeCam = (x, y, z, lx, ly, lz) => {
       this.camFrozen = { x, y, z, lx, ly, lz };
@@ -675,6 +692,37 @@ export class Game {
     };
     w.hallId = () => this.hallId;
     w.statuesReady = () => this.hall?.statuesReady ?? Promise.resolve();
+    w.setAnim = (opts) => {
+      if (opts.sitting !== undefined && opts.sitting !== null) {
+        this.sitting = opts.sitting;
+        this.audio.setSitting(opts.sitting);
+      }
+      if (!this.localMonk) return;
+      this.localMonk.debugMoving = opts.moving === undefined ? this.localMonk.debugMoving : opts.moving;
+      this.localMonk.debugSitting = opts.sitting === undefined ? this.localMonk.debugSitting : opts.sitting;
+      if (opts.phase !== undefined) this.localMonk.debugPhase = opts.phase;
+    };
+    w.sitOnCushion = (id = 25) => {
+      const pos = cushionPosition(id, this.hallId);
+      this.localGroup.position.set(pos.x, 0, pos.z);
+      this.localGroup.rotation.y = 0;
+      this.room?.send("move", { x: pos.x, z: pos.z, rotY: 0 });
+      this.room?.send("sit", { cushionId: id });
+      this.sitting = true;
+      this.audio.setSitting(true);
+      if (this.localMonk) {
+        this.localMonk.debugSitting = true;
+        this.localMonk.debugMoving = false;
+        this.localMonk.debugPhase = 0;
+      }
+    };
+    w.playerPose = () => ({
+      x: this.localGroup.position.x,
+      y: this.localGroup.position.y,
+      z: this.localGroup.position.z,
+      rotY: this.localGroup.rotation.y,
+      headY: this.localMonk ? this.localMonk.headWorldY() : 1.3,
+    });
   }
 }
 
