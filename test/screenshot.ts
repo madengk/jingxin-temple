@@ -1,135 +1,132 @@
 /**
- * Headless Chromium screenshots of 静心寺.
- * SCREENSHOT_PREFIX=round4 writes screenshots/round4-*.png
+ * Preview screenshots. SCREENSHOT_PREFIX=round5 writes screenshots/round5-*.png
  */
-import fs from "node:fs";
-import path from "node:path";
-import { fileURLToPath } from "node:url";
-import { chromium, type Page } from "playwright";
+import { chromium } from "playwright";
+import path from "path";
+import { fileURLToPath } from "url";
+import { mkdir } from "fs/promises";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const outDir = path.resolve(__dirname, "../screenshots");
-fs.mkdirSync(outDir, { recursive: true });
-
+const ROOT = path.resolve(__dirname, "..");
+const OUT = path.join(ROOT, "screenshots");
+const PREFIX = process.env.SCREENSHOT_PREFIX || "round5";
 const BASE = process.env.JINGXIN_URL || "http://localhost:2567";
-const PREFIX = process.env.SCREENSHOT_PREFIX || "";
+
 const tag = PREFIX ? `${PREFIX}-` : "";
 
-function out(name: string): string {
-  return path.join(outDir, `${tag}${name}.png`);
-}
-
-async function shot(page: Page, name: string) {
-  const dest = out(name);
-  await page.screenshot({ path: dest, type: "png" });
-  console.log("wrote", dest, fs.statSync(dest).size);
-}
-
-type Hook = {
-  teleport: (x: number, z: number, r?: number) => void;
+interface Jx {
   freezeCam: (x: number, y: number, z: number, lx: number, ly: number, lz: number) => void;
   unfreezeCam: () => void;
-};
-
-async function teleport(page: Page, x: number, z: number, r = 0) {
-  await page.evaluate(({ x, z, r }) => {
-    const j = (window as unknown as { __JINGXIN?: Hook }).__JINGXIN;
-    if (!j) throw new Error("no hook");
-    j.unfreezeCam?.();
-    j.teleport(x, z, r);
-  }, { x, z, r });
-  await page.waitForTimeout(1400);
+  teleport: (x: number, z: number, rotY?: number) => void;
+  joinHall: (id: string) => Promise<void>;
+  seedIncense: (n?: number, burnerId?: string) => void;
+  hallId: () => string;
 }
 
-async function freezeCam(
-  page: Page,
-  x: number, y: number, z: number,
-  lx: number, ly: number, lz: number,
-) {
-  // Park the monk out of frame so the plaque is unobstructed.
-  await page.evaluate(({ x, y, z, lx, ly, lz }) => {
-    const j = (window as unknown as { __JINGXIN?: Hook }).__JINGXIN;
-    if (!j) throw new Error("no hook");
-    j.teleport(0, -22, 0);
-    j.freezeCam(x, y, z, lx, ly, lz);
-  }, { x, y, z, lx, ly, lz });
+async function ready(page: import("playwright").Page) {
+  await page.waitForFunction(() => typeof (window as unknown as Jx).freezeCam === "function", { timeout: 25000 });
   await page.waitForTimeout(700);
 }
 
+async function freezeCam(page: import("playwright").Page, x: number, y: number, z: number, lx: number, ly: number, lz: number) {
+  await page.evaluate(({ x, y, z, lx, ly, lz }) => {
+    (window as unknown as Jx).freezeCam(x, y, z, lx, ly, lz);
+  }, { x, y, z, lx, ly, lz });
+  await page.waitForTimeout(350);
+}
+
+async function shot(page: import("playwright").Page, name: string) {
+  const dest = path.join(OUT, `${tag}${name}.png`);
+  await page.screenshot({ path: dest, type: "png" });
+  console.log("wrote", dest);
+}
+
+async function joinHall(page: import("playwright").Page, id: string) {
+  await page.evaluate(async (id) => {
+    await (window as unknown as Jx).joinHall(id);
+  }, id);
+  await page.waitForTimeout(1200);
+}
+
 async function main() {
-  const browser = await chromium.launch({
-    executablePath: process.env.CHROME || "/usr/bin/google-chrome",
-    args: [
-      "--no-sandbox",
-      "--disable-gpu",
-      "--use-gl=angle",
-      "--use-angle=swiftshader",
-      "--enable-webgl",
-      "--ignore-gpu-blocklist",
-    ],
-    headless: true,
-  });
-  const page = await browser.newPage({ viewport: { width: 1600, height: 900 } });
-  page.on("pageerror", (e) => console.error("pageerror", e));
-  page.on("console", (m) => {
-    const t = m.type();
-    if (t === "error" || t === "warning") console.log("console", t, m.text());
-  });
-
-  await page.goto(BASE + "/", { waitUntil: "networkidle", timeout: 30000 });
+  await mkdir(OUT, { recursive: true });
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROME_PATH || '/usr/bin/google-chrome-stable' });
+  const page = await browser.newPage({ viewport: { width: 1280, height: 800 } });
+  page.setDefaultTimeout(40000);
+  await page.goto(`${BASE}/?auto=1&name=拍摄僧${Date.now() % 10000}`, { waitUntil: "networkidle" });
+  await page.waitForSelector("#game:not([hidden])", { timeout: 25000 });
+  await ready(page);
+  // let fonts / murals settle
   await page.waitForTimeout(800);
-  await shot(page, "login");
 
-  await page.fill("#name-input", "清心行者");
-  await page.click("#enter-btn");
-  await page.waitForFunction(() => (window as unknown as { __JINGXIN_READY?: boolean }).__JINGXIN_READY === true, {
-    timeout: 25000,
-  });
-  await page.waitForTimeout(2200);
-  await shot(page, "courtyard");
+  // 1. Courtyard — wide, all hall plaques
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, -18, 0));
+  // Elevated overview: 大雄宝殿 plaque + both side-hall rows
+  await freezeCam(page, 0, 12.5, -33.0, 0, 3.2, -6);
+  await shot(page, "courtyard-plaques");
+  await freezeCam(page, 0, 6.5, -8.0, 0, 8.5, 0.2);
+  await shot(page, "courtyard-main-plaque");
+  // closer west row plaques
+  await freezeCam(page, -8, 4.2, -8, -20, 3.6, -14);
+  await shot(page, "courtyard-west-plaques");
+  await freezeCam(page, 8, 4.2, -8, 20, 3.6, -14);
+  await shot(page, "courtyard-east-plaques");
+  await freezeCam(page, 0, 4.0, -28, 0, 3.2, -35);
+  await shot(page, "courtyard-south-plaques");
 
-  // Main hall, facing the Buddha (monk in frame, third-person)
-  await teleport(page, 0, 9.5, 0);
-  await shot(page, "main-hall");
+  // 2. Incense — seed many sticks on the main-hall entrance burner, no countdown
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, -4.2, 0));
+  await page.evaluate(() => (window as unknown as Jx).seedIncense(56, "burner_main"));
+  await page.waitForTimeout(800);
+  await freezeCam(page, 1.6, 1.55, -5.4, 0, 1.15, -2.0);
+  await shot(page, "incense-burner");
 
-  // Close plaques: frozen camera, monk parked out of frame
-  // 释迦牟尼佛 / 如来佛祖 — seated on dais at (0, 21.6), plaque in front
-  await freezeCam(page, 0, 3.15, 12.2, 0, 2.85, 20.6);
+  // 3. Main hall — reference-like behind-player looking at the altar
+  await joinHall(page, "main");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 8.2, 0));
+  // behind a chibi monk, looking up at the tall gilt Buddha
+  await freezeCam(page, 0, 2.05, 6.4, 0, 5.2, 21.0);
+  await shot(page, "main-hall-reference");
+  await freezeCam(page, 0, 2.4, 10.5, 0, 6.5, 21.5);
   await shot(page, "buddha-front");
-  await shot(page, "buddha-plaque");
-
-  // Eastern kings at x=−13, face +X (inward). Camera in the aisle looking west.
-  await freezeCam(page, -6.6, 2.55, 8.0, -13.0, 2.45, 8.0);
-  await shot(page, "king-east-dhritarashtra");
-  await freezeCam(page, -5.6, 2.7, 18.4, -13.0, 2.55, 16.0);
-  await shot(page, "king-east-virudhaka");
-
-  // Western kings at x=+13, face −X (inward).
-  await freezeCam(page, 6.6, 2.55, 8.0, 13.0, 2.45, 8.0);
-  await shot(page, "king-west-virupaksha");
-  await freezeCam(page, 5.6, 2.7, 18.4, 13.0, 2.55, 16.0);
-  await shot(page, "king-west-vaishravana");
-
-  // 韦陀 at (−3.6, 3.2), plaque faces −Z (the entrance, south)
-  await freezeCam(page, -2.2, 2.2, -1.5, -3.6, 2.05, 3.2);
-  await shot(page, "weituo");
-
-  // 3/4 side angles — prove the relief has real volume, not a flat card.
-  // Buddha: from the southeast aisle, seeing the right side and the mandorla edge.
-  await freezeCam(page, 5.8, 3.5, 14.8, 0.2, 3.2, 21.4);
+  await freezeCam(page, 5.4, 3.6, 14.2, 0.2, 6.0, 21.2);
   await shot(page, "buddha-three-quarter");
-  // 西方广目 (raised knee + dragon): from the aisle, slightly south, clears pillars at x=10, z=5/10.
-  await freezeCam(page, 6.0, 2.85, 5.7, 13.0, 2.5, 8.15);
-  await shot(page, "king-west-three-quarter");
+  await freezeCam(page, 3.4, 2.2, 16.2, 0, 3.6, 21.0);
+  await shot(page, "sumeru-low");
 
-  // Incense + a turned-facing shot (camera follows behind the monk)
-  await teleport(page, 0, 15.5, 0);
-  await page.click("#btn-incense").catch(() => {});
-  await page.waitForTimeout(1500);
-  await shot(page, "incense");
+  // 4. One side hall (观音) + a second (弥勒, 关公) to show variety
+  await joinHall(page, "guanyin");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
+  await freezeCam(page, 0, 2.0, 4.6, 0, 4.8, 16.4);
+  await shot(page, "hall-guanyin");
 
-  await teleport(page, 2, 11, Math.PI * 0.55);
-  await shot(page, "turn-follow");
+  await joinHall(page, "mile");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
+  await freezeCam(page, 0, 2.0, 4.6, 0, 4.6, 16.4);
+  await shot(page, "hall-mile");
+
+  await joinHall(page, "qielan");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 6.0, 0));
+  await freezeCam(page, 0, 2.0, 4.6, 0, 4.6, 16.4);
+  await shot(page, "hall-qielan");
+
+  // 5. Tools UI: wooden fish + beads (already on HUD). Zoom a bit on the game view with panels visible.
+  await joinHall(page, "main");
+  await page.evaluate(() => (window as unknown as Jx).teleport(0, 9.0, 0));
+  await freezeCam(page, 0, 2.05, 6.8, 0, 5.0, 21.0);
+  // strike muyu and advance beads so the panels look alive
+  await page.click("#muyu-canvas");
+  await page.waitForTimeout(200);
+  const box = await page.locator("#beads-canvas").boundingBox();
+  if (box) {
+    const cx = box.x + box.width * 0.5, cy = box.y + box.height * 0.35;
+    for (let i = 0; i < 16; i++) {
+      await page.mouse.click(cx + 20 * Math.cos(i), cy + 20 * Math.sin(i));
+      await page.waitForTimeout(40);
+    }
+  }
+  await page.waitForTimeout(300);
+  await shot(page, "tools-muyu-beads");
 
   await browser.close();
 }

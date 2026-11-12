@@ -1,74 +1,308 @@
-/** Shared constants and layout used by both server and client. */
+/** Shared constants and temple layout — used by both server and client. */
 
 export const CUSHION_COUNT = 50;
 export const CUSHION_ROWS = 5;
 export const CUSHION_COLS = 10;
-export const CUSHION_SPACING_X = 2.15;
-export const CUSHION_SPACING_Z = 2.2;
-export const CUSHION_ORIGIN_Z = 7.2;
-export const CUSHION_RADIUS = 0.55;
+/** Side-hall cushion spacing (slightly tighter than the main hall). */
+export const CUSHION_SPACING_X = 1.55;
+export const CUSHION_SPACING_Z = 1.65;
+export const CUSHION_ORIGIN_Z = 3.2;
+export const CUSHION_RADIUS = 0.48; // half-width of the square mat (visual)
 
-export const HALL_BOUNDS = {
-  minX: -22,
-  maxX: 22,
-  minZ: -36,
-  maxZ: 24.5,
-};
+/** Main-hall cushions: wider nave. */
+export const MAIN_CUSHION_SPACING_X = 2.15;
+export const MAIN_CUSHION_SPACING_Z = 2.2;
+export const MAIN_CUSHION_ORIGIN_Z = 5.6;
 
-/** Do not walk onto the Buddha dais. */
-export const DAIS = { minX: -6.2, maxX: 6.2, minZ: 18.4, maxZ: 25.5 };
-
-export const INCENSE_BURNER = { x: 0, z: 17.2, radius: 2.4 };
-export const MAX_INCENSE = 24;
-export const INCENSE_DURATION_MS = 90_000;
+/** Each stick burns exactly this long, then the server removes it. No HUD / labels. */
+export const INCENSE_DURATION_MS = 10 * 60 * 1000;
+/** Soft cap per burner: oldest stick is retired early if this is exceeded. */
+export const MAX_INCENSE_PER_BURNER = 200;
 export const MAX_CLIENTS = 50;
 export const MAX_MOVE_SPEED = 6.5;
 export const SIT_RANGE = 1.55;
 export const PLAYER_RADIUS = 0.45;
+export const INCENSE_RANGE = 2.4;
 
-export const OTHER_HALLS = [
-  { name: "观音殿", x: -20, z: -10, rotY: Math.PI / 2 },
-  { name: "文殊殿", x: -20, z: -17, rotY: Math.PI / 2 },
-  { name: "普贤殿", x: -20, z: -24, rotY: Math.PI / 2 },
-  { name: "地藏殿", x: -20, z: -31, rotY: Math.PI / 2 },
-  { name: "药师殿", x: 20, z: -10, rotY: -Math.PI / 2 },
-  { name: "弥勒殿", x: 20, z: -17, rotY: -Math.PI / 2 },
-  { name: "伽蓝殿", x: 20, z: -24, rotY: -Math.PI / 2 },
-  { name: "文昌殿", x: 20, z: -31, rotY: -Math.PI / 2 },
-  { name: "财神殿", x: -8, z: -35.5, rotY: 0 },
-  { name: "月老殿", x: 8, z: -35.5, rotY: 0 },
-] as const;
+/**
+ * Hall catalogue, ordered by Chinese Buddhist then folk-religious history
+ * (see docs/HALLS.md). Courtyard positions: west row x=−20 faces +X,
+ * east row x=+20 faces −X, south pair near the mountain gate faces +Z.
+ */
+export type HallId =
+  | "courtyard"
+  | "main"
+  | "guanyin"
+  | "wenshu"
+  | "puxian"
+  | "dizang"
+  | "yaoshi"
+  | "mile"
+  | "qielan"
+  | "wenchang"
+  | "caishen"
+  | "yuelao";
 
-export function cushionPosition(i: number): { x: number; z: number } {
+export type DeityKind =
+  | "buddha"
+  | "guanyin"
+  | "wenshu"
+  | "puxian"
+  | "dizang"
+  | "yaoshi"
+  | "mile"
+  | "guanyu"
+  | "wenchang"
+  | "caishen"
+  | "yuelao";
+
+export interface HallDef {
+  id: HallId;
+  room: string;
+  name: string;
+  deity: string;
+  deityTitle: string;
+  kind: DeityKind;
+  /** Courtyard building centre. */
+  x: number;
+  z: number;
+  /** Facade facing (yaw). */
+  rotY: number;
+  /** Historical / mythological note (short). */
+  lore: string;
+}
+
+export const MAIN_HALL: HallDef = {
+  id: "main",
+  room: "main_hall",
+  name: "大雄宝殿",
+  deity: "释迦牟尼佛",
+  deityTitle: "如来佛祖",
+  kind: "buddha",
+  x: 0,
+  z: 0.6,
+  rotY: Math.PI, // facade faces the courtyard (−Z)
+  lore: "释迦牟尼，佛教教主，大雄宝殿为汉传寺院中轴主殿。",
+};
+
+export const SIDE_HALLS: HallDef[] = [
+  {
+    id: "guanyin", room: "hall_guanyin", name: "观音殿",
+    deity: "观世音菩萨", deityTitle: "大慈大悲", kind: "guanyin",
+    x: -20, z: -10, rotY: Math.PI / 2,
+    lore: "观世音菩萨，东汉至两晋经典传入中土，是汉地最广为崇奉的菩萨。",
+  },
+  {
+    id: "wenshu", room: "hall_wenshu", name: "文殊殿",
+    deity: "文殊菩萨", deityTitle: "大智", kind: "wenshu",
+    x: -20, z: -17, rotY: Math.PI / 2,
+    lore: "文殊师利，大智，五台山道场；大乘早期经典中的智慧菩萨，常侍佛左。",
+  },
+  {
+    id: "puxian", room: "hall_puxian", name: "普贤殿",
+    deity: "普贤菩萨", deityTitle: "大行", kind: "puxian",
+    x: -20, z: -24, rotY: Math.PI / 2,
+    lore: "普贤菩萨，大行，峨眉道场；与文殊成对，表行愿。",
+  },
+  {
+    id: "dizang", room: "hall_dizang", name: "地藏殿",
+    deity: "地藏王菩萨", deityTitle: "地狱不空誓不成佛", kind: "dizang",
+    x: -20, z: -31, rotY: Math.PI / 2,
+    lore: "地藏菩萨，唐代金地藏驻九华后在汉地广为崇奉，誓度众生。",
+  },
+  {
+    id: "yaoshi", room: "hall_yaoshi", name: "药师殿",
+    deity: "药师佛", deityTitle: "药师琉璃光如来", kind: "yaoshi",
+    x: 20, z: -10, rotY: -Math.PI / 2,
+    lore: "药师琉璃光如来，东方净琉璃世界教主，大乘三世佛之一，主消灾延寿。",
+  },
+  {
+    id: "mile", room: "hall_mile", name: "弥勒殿",
+    deity: "弥勒佛", deityTitle: "当来下生", kind: "mile",
+    x: 20, z: -17, rotY: -Math.PI / 2,
+    lore: "弥勒，未来佛；汉地寺院常以弥勒为香客所见第一尊，此设专殿。",
+  },
+  {
+    id: "qielan", room: "hall_qielan", name: "伽蓝殿",
+    deity: "伽蓝菩萨（关公）", deityTitle: "护法伽蓝", kind: "guanyu",
+    x: 20, z: -24, rotY: -Math.PI / 2,
+    lore: "关羽（卒于公元 220 年），后世奉为伽蓝菩萨，是本寺民间诸殿中史实最早者。",
+  },
+  {
+    id: "wenchang", room: "hall_wenchang", name: "文昌殿",
+    deity: "文昌帝君", deityTitle: "司禄文衡", kind: "wenchang",
+    x: 20, z: -31, rotY: -Math.PI / 2,
+    lore: "文昌帝君，源自梓潼神，元仁宗封号后主科举文运，儒家与寺院常并祀。",
+  },
+  {
+    id: "caishen", room: "hall_caishen", name: "财神殿",
+    deity: "财神赵公明", deityTitle: "金龙如意正一玄坛真君", kind: "caishen",
+    x: -8, z: -35.5, rotY: 0,
+    lore: "赵公明等财神信仰盛于明代，是较晚近的民间崇祀。",
+  },
+  {
+    id: "yuelao", room: "hall_yuelao", name: "月老殿",
+    deity: "月下老人", deityTitle: "姻缘司命", kind: "yuelao",
+    x: 8, z: -35.5, rotY: 0,
+    lore: "月老，唐代李复言《续玄怪录·定婚店》首见其形象，专职殿祀更晚。",
+  },
+];
+
+export const ALL_HALLS: HallDef[] = [MAIN_HALL, ...SIDE_HALLS];
+
+export function hallByRoom(room: string): HallDef | undefined {
+  if (room === "courtyard") return undefined;
+  return ALL_HALLS.find((h) => h.room === room);
+}
+
+export function hallById(id: HallId): HallDef | undefined {
+  if (id === "courtyard") return undefined;
+  return ALL_HALLS.find((h) => h.id === id);
+}
+
+/** Bronze incense burner at a hall entrance (courtyard). */
+export interface BurnerDef {
+  id: string;
+  hallId: HallId;
+  x: number;
+  z: number;
+  radius: number;
+}
+
+function burnerInFront(h: HallDef): BurnerDef {
+  // Stand ~2.6 units in front of the facade, along the facing direction.
+  // rotY = 0 faces +Z, π/2 faces +X, −π/2 faces −X, π faces −Z.
+  const fx = Math.sin(h.rotY);
+  const fz = Math.cos(h.rotY);
+  // For MAIN_HALL rotY=π, facing −Z, burner in the courtyard at z≈−2.4.
+  const dist = h.id === "main" ? 2.6 : 2.55;
+  return {
+    id: `burner_${h.id}`,
+    hallId: h.id,
+    x: h.x + fx * dist,
+    z: h.z + fz * dist,
+    radius: INCENSE_RANGE,
+  };
+}
+
+export const BURNERS: BurnerDef[] = ALL_HALLS.map(burnerInFront);
+
+export const COURTYARD_BOUNDS = {
+  minX: -22,
+  maxX: 22,
+  minZ: -36,
+  maxZ: 0.4,
+};
+
+/** Local interior frame: door at z≈0, deity on +Z. */
+export const INTERIOR_BOUNDS = {
+  minX: -8.6,
+  maxX: 8.6,
+  minZ: -0.2,
+  maxZ: 18.4,
+};
+export const INTERIOR_DAIS = { minX: -5.4, maxX: 5.4, minZ: 14.6, maxZ: 19.0 };
+
+export const MAIN_INTERIOR_BOUNDS = {
+  minX: -14.6,
+  maxX: 14.6,
+  minZ: -0.2,
+  maxZ: 24.5,
+};
+export const MAIN_DAIS = { minX: -6.4, maxX: 6.4, minZ: 17.6, maxZ: 25.2 };
+
+export function cushionPosition(i: number, hallId: HallId = "main"): { x: number; z: number } {
+  const main = hallId === "main";
+  const sx = main ? MAIN_CUSHION_SPACING_X : CUSHION_SPACING_X;
+  const sz = main ? MAIN_CUSHION_SPACING_Z : CUSHION_SPACING_Z;
+  const oz = main ? MAIN_CUSHION_ORIGIN_Z : CUSHION_ORIGIN_Z;
   const r = Math.floor(i / CUSHION_COLS);
   const c = i % CUSHION_COLS;
-  const x = (c - (CUSHION_COLS - 1) / 2) * CUSHION_SPACING_X;
-  const z = CUSHION_ORIGIN_Z + r * CUSHION_SPACING_Z;
+  const x = (c - (CUSHION_COLS - 1) / 2) * sx;
+  const z = oz + r * sz;
   return { x, z };
 }
 
-export function allCushionPositions(): { x: number; z: number }[] {
-  return Array.from({ length: CUSHION_COUNT }, (_, i) => cushionPosition(i));
+export function allCushionPositions(hallId: HallId = "main"): { x: number; z: number }[] {
+  return Array.from({ length: CUSHION_COUNT }, (_, i) => cushionPosition(i, hallId));
 }
 
-export function clampToWalkable(x: number, z: number): { x: number; z: number } {
-  let nx = Math.max(HALL_BOUNDS.minX, Math.min(HALL_BOUNDS.maxX, x));
-  let nz = Math.max(HALL_BOUNDS.minZ, Math.min(HALL_BOUNDS.maxZ, z));
-  // Keep off the Buddha dais
-  if (nx > DAIS.minX && nx < DAIS.maxX && nz > DAIS.minZ && nz < DAIS.maxZ) {
-    // Push toward the front edge (smaller z)
-    nz = DAIS.minZ;
+function inBox(x: number, z: number, b: { minX: number; maxX: number; minZ: number; maxZ: number }) {
+  return x > b.minX && x < b.maxX && z > b.minZ && z < b.maxZ;
+}
+
+/** Push a courtyard position out of a side-hall building, leaving the doorway open. */
+function pushOutOfBuilding(x: number, z: number, h: HallDef): { x: number; z: number } {
+  // Buildings are ~6 wide along the facade and ~4 deep.
+  const alongX = Math.abs(Math.cos(h.rotY)); // 1 when facade is along X (south halls)
+  const halfW = 3.1; // along facade
+  const halfD = 2.15; // depth
+  // Local: +depth is behind the facade (into the building, opposite facing).
+  const fx = Math.sin(h.rotY);
+  const fz = Math.cos(h.rotY);
+  // Facing dir points into the courtyard; building extends opposite and a little forward.
+  const dx = x - h.x;
+  const dz = z - h.z;
+  const forward = dx * fx + dz * fz; // positive = courtyard side
+  const side = dx * (-fz) + dz * fx;
+  const doorHalf = 1.25;
+  // The door opening is on the courtyard face, |side|<doorHalf, forward in [−0.2, 2.4]
+  const inDoor = Math.abs(side) < doorHalf && forward > -0.4 && forward < 2.6;
+  if (inDoor) return { x, z };
+  const inFoot = Math.abs(side) < halfW && forward < 1.0 && forward > -halfD * 2;
+  if (!inFoot) return { x, z };
+  // Push toward the courtyard (positive forward)
+  const push = 1.05 - forward;
+  return { x: x + fx * push, z: z + fz * push };
+}
+
+export function clampToWalkable(x: number, z: number, hallId: HallId = "courtyard"): { x: number; z: number } {
+  if (hallId === "courtyard") {
+    let nx = Math.max(COURTYARD_BOUNDS.minX, Math.min(COURTYARD_BOUNDS.maxX, x));
+    let nz = Math.max(COURTYARD_BOUNDS.minZ, Math.min(COURTYARD_BOUNDS.maxZ, z));
+    // Main hall façade at z≈0, opening |x|<4.0 — crossing it is a room transition,
+    // but don't walk through the solid walls.
+    const OPEN = 4.0;
+    if (nz > -0.15) {
+      if (Math.abs(nx) >= OPEN) nz = -0.15;
+    }
+    for (const h of SIDE_HALLS) {
+      const p = pushOutOfBuilding(nx, nz, h);
+      nx = p.x;
+      nz = p.z;
+    }
+    return { x: nx, z: nz };
   }
-  // Hall side walls (interior of main hall is narrower)
-  if (nz > 0.6) {
-    nx = Math.max(-14.6, Math.min(14.6, nx));
+  if (hallId === "main") {
+    let nx = Math.max(MAIN_INTERIOR_BOUNDS.minX, Math.min(MAIN_INTERIOR_BOUNDS.maxX, x));
+    let nz = Math.max(MAIN_INTERIOR_BOUNDS.minZ, Math.min(MAIN_INTERIOR_BOUNDS.maxZ, z));
+    if (inBox(nx, nz, MAIN_DAIS)) nz = MAIN_DAIS.minZ;
+    // front wall, opening |x|<4
+    if (nz < 0.35 && Math.abs(nx) >= 4.0) nz = 0.35;
+    return { x: nx, z: nz };
   }
-  // Front wall of the hall, with a central doorway
-  const OPEN = 4.2;
-  if (nz > -0.4 && nz < 0.9 && Math.abs(nx) >= OPEN) {
-    nz = nz < 0.25 ? -0.4 : 0.9;
-  }
+  // Side-hall interiors
+  let nx = Math.max(INTERIOR_BOUNDS.minX, Math.min(INTERIOR_BOUNDS.maxX, x));
+  let nz = Math.max(INTERIOR_BOUNDS.minZ, Math.min(INTERIOR_BOUNDS.maxZ, z));
+  if (inBox(nx, nz, INTERIOR_DAIS)) nz = INTERIOR_DAIS.minZ;
+  if (nz < 0.35 && Math.abs(nx) >= 2.2) nz = 0.35;
   return { x: nx, z: nz };
+}
+
+/** Spawn just inside a hall door, facing the deity (+Z). */
+export function interiorSpawn(_hallId: HallId): { x: number; z: number; rotY: number } {
+  return { x: 0, z: 2.2, rotY: 0 };
+}
+
+/** Spawn in the courtyard after leaving a hall, just outside its door, facing the yard. */
+export function courtyardSpawnFrom(h: HallDef): { x: number; z: number; rotY: number } {
+  const fx = Math.sin(h.rotY);
+  const fz = Math.cos(h.rotY);
+  return {
+    x: h.x + fx * 3.4,
+    z: h.z + fz * 3.4,
+    rotY: h.rotY, // face into the courtyard (same as the facade facing)
+  };
 }
 
 export function dist2(ax: number, az: number, bx: number, bz: number): number {
@@ -76,3 +310,55 @@ export function dist2(ax: number, az: number, bx: number, bz: number): number {
   const dz = az - bz;
   return dx * dx + dz * dz;
 }
+
+export function nearestBurner(
+  x: number,
+  z: number,
+  hallId: HallId,
+): BurnerDef | undefined {
+  // Entrance burners live in the courtyard. Interiors have none (Henry: at each entrance).
+  if (hallId !== "courtyard") return undefined;
+  let best: BurnerDef | undefined;
+  let bestD = Infinity;
+  for (const b of BURNERS) {
+    const d = dist2(x, z, b.x, b.z);
+    if (d < b.radius * b.radius && d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}
+
+/** @deprecated use BURNERS; kept so older call sites that only know the main hall still typecheck during the swap. */
+export const INCENSE_BURNER = BURNERS.find((b) => b.hallId === "main") ?? { x: 0, z: -2.6, radius: INCENSE_RANGE };
+
+/** Door threshold: walking past this in the courtyard triggers a room change. */
+export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
+  // Main hall door: z ≈ 0, |x| < 3.6
+  if (z > -0.35 && z < 1.2 && Math.abs(x) < 3.6) return MAIN_HALL;
+  for (const h of SIDE_HALLS) {
+    const fx = Math.sin(h.rotY);
+    const fz = Math.cos(h.rotY);
+    const dx = x - h.x;
+    const dz = z - h.z;
+    const forward = dx * fx + dz * fz;
+    const side = dx * (-fz) + dz * fx;
+    // Crossing into the doorway (forward near 0, going negative = into building)
+    if (Math.abs(side) < 1.2 && forward < 1.05 && forward > -0.8) return h;
+  }
+  return undefined;
+}
+
+/** Leaving an interior through the entrance (local z small). */
+export function interiorExitHit(x: number, z: number, hallId: HallId): boolean {
+  const open = hallId === "main" ? 3.8 : 2.0;
+  return z < 0.15 && Math.abs(x) < open;
+}
+
+// Back-compat alias used by courtyard enclosure / older facades.
+export const OTHER_HALLS = SIDE_HALLS;
+export const HALL_BOUNDS = COURTYARD_BOUNDS;
+export const DAIS = MAIN_DAIS;
+export const CUSHION_ORIGIN_Z_MAIN = MAIN_CUSHION_ORIGIN_Z;
+export const MAX_INCENSE = MAX_INCENSE_PER_BURNER;

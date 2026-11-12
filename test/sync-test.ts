@@ -93,7 +93,7 @@ async function main() {
 
   // 4. movement sync
   try {
-    const destX = 3, destZ = -16;
+    const destX = 3, destZ = 10;
     await walkTo(r1, destX, destZ);
     await waitFor(() => {
       const remote = r2.state.players.get(r1.sessionId) as P | undefined;
@@ -140,22 +140,33 @@ async function main() {
     results.push({ name: "cushion lock", ok: false, detail: String(e) });
   }
 
-  // 6. incense visible to the other client (r2 stands, walks to burner)
+  // 6. incense lives in the courtyard (entrance burners), 10-min memory-only
   try {
-    r1.send("stand");
-    await sleep(150);
+    await r1.leave();
+    await r2.leave();
+    const yc1 = new Client(URL);
+    const yc2 = new Client(URL);
+    const y1 = await yc1.joinOrCreate("courtyard", { name: n1 + "香" });
+    const y2 = await yc2.joinOrCreate("courtyard", { name: n2 + "香" });
+    await sleep(200);
     const { INCENSE_BURNER } = await import("../server/src/shared.ts");
-    await walkTo(r1, INCENSE_BURNER.x, INCENSE_BURNER.z - 1.2);
-    const before = r2.state.incenses.size;
-    r1.send("incense");
-    await waitFor(() => r2.state.incenses.size > before, 3000, "incense");
-    results.push({ name: "incense sync", ok: true, detail: `incenses=${r2.state.incenses.size}` });
-  } catch (e) {
-    results.push({ name: "incense sync", ok: false, detail: String(e) });
-  }
+    await walkTo(y1, INCENSE_BURNER.x, INCENSE_BURNER.z - 1.0);
+    const before = y2.state.incenses.size;
+    y1.send("incense");
+    await waitFor(() => y2.state.incenses.size > before, 3000, "incense");
+    const stick = [...y2.state.incenses.values()][0] as { litAt: number };
+    const fresh = stick && Math.abs(Date.now() - stick.litAt) < 5000;
+    results.push({ name: "incense sync", ok: fresh, detail: `incenses=${y2.state.incenses.size} litAtΔ=${stick ? Date.now()-stick.litAt : "?"}ms` });
 
-  await r1.leave();
-  await r2.leave();
+    // 7. side hall is its own Colyseus room
+    const g1 = await new Client(URL).joinOrCreate("hall_guanyin", { name: n1 + "观" });
+    await sleep(150);
+    const inHall = g1.state.hallId === "guanyin" && g1.state.cushions.length === 50;
+    results.push({ name: "side-hall room", ok: inHall, detail: `hallId=${g1.state.hallId} cushions=${g1.state.cushions.length}` });
+    await y1.leave(); await y2.leave(); await g1.leave();
+  } catch (e) {
+    results.push({ name: "incense/hall rooms", ok: false, detail: String(e) });
+  }
 
   const failed = results.filter((r) => !r.ok);
   for (const r of results) {

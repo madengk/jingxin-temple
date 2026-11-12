@@ -15,14 +15,20 @@ export class Player extends Schema {
 export class Incense extends Schema {
   @type("string") id = "";
   @type("string") by = "";
+  @type("string") burnerId = "";
   @type("float32") x = 0;
   @type("float32") z = 0;
+  /** Server-authoritative Unix ms when the stick was placed. Burns for INCENSE_DURATION_MS. */
   @type("float64") litAt = 0;
 }
 
-export class MainHallState extends Schema {
+export class HallState extends Schema {
+  @type("string") hallId = "courtyard";
   @type({ map: Player }) players = new MapSchema<Player>();
-  /** sessionId of occupant, or "" if empty */
+  /** sessionId of occupant, or "" if empty. Empty in the courtyard. */
   @type(["string"]) cushions = new ArraySchema<string>();
   @type({ map: Incense }) incenses = new MapSchema<Incense>();
 }
+
+/** Back-compat alias. */
+export class MainHallState extends HallState {}

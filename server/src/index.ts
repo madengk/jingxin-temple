@@ -7,7 +7,8 @@ import colyseus from "colyseus";
 import wst from "@colyseus/ws-transport";
 const { Server } = colyseus;
 const { WebSocketTransport } = wst;
-import { MainHallRoom } from "./rooms/MainHallRoom";
+import { HallRoom } from "./rooms/HallRoom";
+import { SIDE_HALLS } from "./shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 2567);
@@ -18,7 +19,12 @@ app.use(cors());
 app.use(express.json());
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, name: "静心寺", room: "main_hall" });
+  res.json({
+    ok: true,
+    name: "静心寺",
+    rooms: ["courtyard", "main_hall", ...SIDE_HALLS.map((h) => h.room)],
+    incense: "memory-only, 10 minutes per stick, no persistence",
+  });
 });
 
 app.use(express.static(dist, { fallthrough: true, index: false }));
@@ -36,7 +42,13 @@ const httpServer = createServer(app);
 const gameServer = new Server({
   transport: new WebSocketTransport({ server: httpServer }),
 });
-gameServer.define("main_hall", MainHallRoom);
+
+// One singleton room per hall. filterBy is unnecessary — each has its own name.
+gameServer.define("courtyard", HallRoom);
+gameServer.define("main_hall", HallRoom);
+for (const h of SIDE_HALLS) {
+  gameServer.define(h.room, HallRoom);
+}
 
 httpServer.listen(PORT, "0.0.0.0", () => {
   console.log(`[静心寺] 法会已开，http://localhost:${PORT}`);

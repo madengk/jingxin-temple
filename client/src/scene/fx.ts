@@ -28,7 +28,7 @@ interface Emitter {
   id: string; x: number; z: number; litAt: number;
 }
 
-const MAX_P = 900;
+const MAX_P = 700;
 
 export class SmokeSystem {
   points: THREE.Points;
@@ -72,16 +72,18 @@ export class SmokeSystem {
     this.acc += dt;
     const now = Date.now();
     // spawn
+    const nEm = Math.max(1, this.emitters.size);
+    const per = (28 / nEm) * 1; // global smoke budget, instanced-friendly
     this.emitters.forEach((e) => {
       const age = now - e.litAt;
       if (age > INCENSE_DURATION_MS) return;
-      const fade = age > INCENSE_DURATION_MS - 8000 ? (INCENSE_DURATION_MS - age) / 8000 : 1;
-      const rate = 18 * fade; // per second per stick
-      const n = Math.min(4, Math.floor(this.acc * rate + Math.random()));
+      const fade = age > INCENSE_DURATION_MS - 20_000 ? (INCENSE_DURATION_MS - age) / 20_000 : 1;
+      const rate = Math.max(0.6, per) * fade;
+      const n = Math.min(2, Math.floor(this.acc * rate + Math.random()));
       for (let i = 0; i < n && this.particles.length < MAX_P; i++) {
         this.particles.push({
           x: e.x + (Math.random() - 0.5) * 0.08,
-          y: 1.2 + Math.random() * 0.05,
+          y: 1.55 + Math.random() * 0.05,
           z: e.z + (Math.random() - 0.5) * 0.08,
           vx: (Math.random() - 0.5) * 0.08,
           vy: 0.35 + Math.random() * 0.25,
@@ -133,6 +135,6 @@ export function makeNametag(name: string, isMe: boolean): CSS2DObject {
   el.className = "nametag" + (isMe ? " me" : "");
   el.textContent = name;
   const obj = new CSS2DObject(el);
-  obj.position.set(0, 1.95, 0);
+  obj.position.set(0, 1.32, 0);
   return obj;
 }

@@ -34,11 +34,11 @@ TMP.mkdir(parents=True, exist_ok=True)
 # World units: mesh height = 1, Y up, front faces −Z (worshippers).
 PARAMS = {
     "buddha":     dict(relief=0.26, thickness=0.13, wrap=0.09, metal="gold",     grid=168),
-    "king-east":  dict(relief=0.36, thickness=0.20, wrap=0.07, metal="painted",  grid=160),
-    "king-south": dict(relief=0.36, thickness=0.20, wrap=0.07, metal="painted",  grid=160),
-    "king-west":  dict(relief=0.38, thickness=0.22, wrap=0.07, metal="painted",  grid=160),
-    "king-north": dict(relief=0.34, thickness=0.18, wrap=0.06, metal="painted",  grid=168),
-    "weituo":     dict(relief=0.24, thickness=0.15, wrap=0.07, metal="gilt_wood", grid=160),
+    "king-east":  dict(relief=0.36, thickness=0.20, wrap=0.07, metal="gold",  grid=160),
+    "king-south": dict(relief=0.36, thickness=0.20, wrap=0.07, metal="gold",  grid=160),
+    "king-west":  dict(relief=0.38, thickness=0.22, wrap=0.07, metal="gold",  grid=160),
+    "king-north": dict(relief=0.34, thickness=0.18, wrap=0.06, metal="gold",  grid=168),
+    "weituo":     dict(relief=0.24, thickness=0.15, wrap=0.07, metal="gold", grid=160),
 }
 
 IMAGENET_MEAN = np.array([0.485, 0.456, 0.406], np.float32)
@@ -395,10 +395,11 @@ def metal_rough(rgb: np.ndarray, mask: np.ndarray, kind: str, ao: np.ndarray):
     gold_f = ndimage.gaussian_filter(gold.astype(np.float32), 1.2)
 
     if kind == "gold":
-        metal = 0.62 + 0.30 * gold_f + 0.08 * np.clip(val, 0, 1)
-        metal = np.clip(metal, 0.58, 0.94)
-        rough = 0.30 + 0.18 * (1 - gold_f) + 0.15 * (1 - ao)
-        rough = np.clip(rough, 0.26, 0.55)
+        # Full 金身: high metalness everywhere, slightly higher on bright leaf.
+        metal = 0.74 + 0.16 * np.clip(val, 0, 1)
+        metal = np.clip(metal, 0.72, 0.93)
+        rough = 0.27 + 0.16 * (1.0 - np.clip(val, 0, 1)) + 0.12 * (1.0 - ao)
+        rough = np.clip(rough, 0.24, 0.50)
     elif kind == "gilt_wood":
         metal = 0.18 + 0.50 * gold_f
         metal = np.clip(metal, 0.12, 0.72)
@@ -932,14 +933,40 @@ def preview_views(mesh, albedo, path_front: Path, path_tq: Path):
 # ---------------------------------------------------------------------------
 # Albedo: composite on black (geometry is the silhouette; JPEG has no alpha)
 # ---------------------------------------------------------------------------
+def to_gilt_rgb(rgb: np.ndarray, mask: np.ndarray) -> np.ndarray:
+    """Turn a painted statue photo into a 金身 (gilt body) while keeping carved detail.
+
+    Luminance of the original becomes the relief of a gold surface: dark recesses
+    stay dark gold, highlights go to bright leaf-gold. A little of the original
+    chroma is kept so patterns in the armour remain readable.
+    """
+    c = rgb.astype(np.float32) / 255.0
+    lum = np.clip(0.28 * c[..., 0] + 0.57 * c[..., 1] + 0.15 * c[..., 2], 0, 1)
+    # Contrast + midtone lift so faces and folds stay clear on gold
+    lum = np.clip((lum - 0.06) / 0.86, 0, 1)
+    lum = np.power(lum, 0.86)
+    dark = np.array([0.30, 0.15, 0.035], np.float32)
+    mid  = np.array([0.82, 0.58, 0.16], np.float32)
+    hi   = np.array([1.00, 0.91, 0.52], np.float32)
+    t = lum[..., None]
+    gilt = np.where(t < 0.5, dark + (mid - dark) * (t * 2.0), mid + (hi - mid) * ((t - 0.5) * 2.0))
+    # 12% of original colour, desaturated, so painted motifs aren't completely lost
+    gray = lum[..., None]
+    orig = c * 0.35 + gray * 0.65
+    gilt = gilt * 0.88 + orig * np.array([0.95, 0.75, 0.35]) * 0.12
+    gilt = np.clip(gilt, 0, 1)
+    gilt[~mask] = np.array([0.11, 0.07, 0.03])
+    return (gilt * 255).astype(np.uint8)
+
+
 def albedo_jpeg_rgb(rgba: np.ndarray) -> np.ndarray:
-    a = rgba[..., 3:4].astype(np.float32) / 255.0
-    # premultiply onto a dark gilt so any slight bleed is not white-haloing
+    a = rgba[..., 3] > 40
+    rgb = rgba[..., :3]
+    gilt = to_gilt_rgb(rgb, a)
+    alpha = rgba[..., 3:4].astype(np.float32) / 255.0
     bg = np.array([28, 18, 8], np.float32)
-    rgb = rgba[..., :3].astype(np.float32) * a + bg * (1 - a)
-    # Gentle midtone lift — source photos are taken in dim temple light.
-    rgb = 255.0 * np.power(np.clip(rgb / 255.0, 0, 1), 0.88)
-    return np.clip(rgb, 0, 255).astype(np.uint8)
+    out = gilt.astype(np.float32) * alpha + bg * (1 - alpha)
+    return np.clip(out, 0, 255).astype(np.uint8)
 
 
 # ---------------------------------------------------------------------------
