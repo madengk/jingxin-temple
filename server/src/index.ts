@@ -12,7 +12,7 @@ import { SIDE_HALLS, BUILD_VERSION } from "./shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 2567);
-const dist = path.resolve(__dirname, "../../client/dist");
+const dist = path.resolve(__dirname, process.env.DIST || "../../client/dist");
 
 const app = express();
 app.use(cors());

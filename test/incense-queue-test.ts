@@ -86,7 +86,7 @@ check("mid third bow", ritualPhaseAt(500 + 900 + 900 + 400) === RITUAL_PHASE.BOW
 check("plant phase", ritualPhaseAt(ritualPlantAtMs() - 10) === RITUAL_PHASE.PLANT);
 check("done after plant", ritualPhaseAt(ritualDoneAtMs() - 10) === RITUAL_PHASE.DONE);
 check("total ritual is 5–7 seconds", ritualDoneAtMs() >= 4000 && ritualDoneAtMs() <= 7000, `doneAt=${ritualDoneAtMs()}`);
-check("build version matches the planned id", BUILD_VERSION === "round15-incense-queue-20261113");
+check("build version matches the planned id", BUILD_VERSION === "round16-seamless-doors-20261113");
 
 async function runLive() {
   console.log(`live queue @ ${URL}`);

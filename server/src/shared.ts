@@ -198,7 +198,8 @@ export const COURTYARD_BOUNDS = {
   minX: -22,
   maxX: 22,
   minZ: -36,
-  maxZ: 0.4,
+  /** Through the main-hall opening only; façade walls still stop |x|≥4. */
+  maxZ: 1.2,
 };
 
 /** Local interior frame: door at z≈0, deity on +Z. */
@@ -342,8 +343,12 @@ export const INCENSE_BURNER = BURNERS.find((b) => b.hallId === "main") ?? { x: 0
  * wall collider. Walking into this zone starts the room transition.
  */
 export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
-  // Main hall: on the steps, after the entrance burner at z≈−2, before the wall at z≈0.12.
-  if (z > -1.8 && z < 0.8 && Math.abs(x) < 3.8) return MAIN_HALL;
+  // Main hall: the actual threshold (not the steps or the burner). Walking
+  // into this thin slab starts a seamless room switch at the same position.
+  // The whole walkable opening, including a short stretch past the
+  // threshold (up to courtyard maxZ). Direction hysteresis on the client
+  // prevents bounce; a thin slab could be skipped on a long frame.
+  if (z > -0.35 && z < 1.25 && Math.abs(x) < 3.8) return MAIN_HALL;
   for (const h of SIDE_HALLS) {
     const fx = Math.sin(h.rotY);
     const fz = Math.cos(h.rotY);
@@ -352,7 +357,7 @@ export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
     const forward = dx * fx + dz * fz;
     const side = dx * (-fz) + dz * fx;
     const front = hallFrontDistance(h);
-    if (Math.abs(side) < 1.5 && forward < front + 1.55 && forward > front - 0.35) return h;
+    if (Math.abs(side) < 1.4 && forward < front + 0.5 && forward > front - 1.25) return h;
   }
   return undefined;
 }
@@ -360,7 +365,7 @@ export function courtyardDoorHit(x: number, z: number): HallDef | undefined {
 /** Leaving an interior through the entrance (local z toward the door). */
 export function interiorExitHit(x: number, z: number, hallId: HallId): boolean {
   const open = hallId === "main" ? 4.0 : 2.2;
-  return z < 0.95 && Math.abs(x) < open;
+  return z < 0.35 && Math.abs(x) < open;
 }
 
 // Back-compat alias used by courtyard enclosure / older facades.
@@ -371,7 +376,7 @@ export const CUSHION_ORIGIN_Z_MAIN = MAIN_CUSHION_ORIGIN_Z;
 export const MAX_INCENSE = MAX_INCENSE_PER_BURNER;
 
 /** Current client/server build id — must match <html data-version>. */
-export const BUILD_VERSION = "round15-incense-queue-20261113";
+export const BUILD_VERSION = "round16-seamless-doors-20261113";
 
 /** Distance from burner centre to the offering (front-of-queue) stand point, into the courtyard. */
 export const OFFER_DISTANCE = 1.45;
