@@ -106,6 +106,24 @@ function stoneTex(): THREE.CanvasTexture {
 }
 
 /** Horizontal gilt 匾额. */
+
+function makeFacadePreview(hallId: HallId): THREE.Group {
+  const g = new THREE.Group();
+  g.name = `facadePreview_${hallId}`;
+  g.userData.facadeHallId = hallId;
+  return g;
+}
+
+/** Show or hide a courtyard façade's shallow interior (used when the real hall is visible). */
+export function setFacadePreviewVisible(root: THREE.Object3D, hallId: HallId, visible: boolean) {
+  const name = `facadePreview_${hallId}`;
+  root.traverse((o) => {
+    if (o.name === name || o.userData?.facadeHallId === hallId && o.name.startsWith("facadePreview_")) {
+      o.visible = visible;
+    }
+  });
+}
+
 export function hangingPlaque(title: string, w = 3.6, h = 1.05): THREE.Group {
   const g = new THREE.Group();
   const wood = mat(0x3a100c, { roughness: 0.45, metalness: 0.1 });
@@ -350,7 +368,7 @@ export function buildCourtyard(_scene: THREE.Scene): HallObjects {
   const darkWood = mat(0x2a1c12, { roughness: 0.8 });
   const stone = mat(0xc9c0b2, { map: stoneTex(), roughness: 0.88 });
 
-  const court = M(new THREE.BoxGeometry(48, 0.12, 42), stone, 0, -0.06, -16);
+  const court = M(new THREE.BoxGeometry(48, 0.12, 36), stone, 0, -0.06, -18);
   court.receiveShadow = true;
   group.add(court);
   const path = M(new THREE.BoxGeometry(4.0, 0.04, 28), mat(0x8a8074, { roughness: 0.9 }), 0, 0.02, -16);
@@ -379,12 +397,13 @@ export function buildCourtyard(_scene: THREE.Scene): HallObjects {
   const midZ = depth / 2;
   const backZ = depth;
   const frontZ = 0.12;
+  const preview = makeFacadePreview("main");
   const floor = M(new THREE.BoxGeometry(hallW - 0.4, 0.1, depth + 0.2), mat(0x2a1c16, { map: darkPlankTex(), roughness: 0.72 }), 0, 0.02, midZ);
   floor.receiveShadow = true;
-  group.add(floor);
-  group.add(M(new THREE.BoxGeometry(hallW + 0.3, wallH, 0.4), plaster, 0, wallH / 2, backZ));
-  group.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, -hallW / 2, wallH / 2, midZ));
-  group.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, hallW / 2, wallH / 2, midZ));
+  preview.add(floor);
+  preview.add(M(new THREE.BoxGeometry(hallW + 0.3, wallH, 0.4), plaster, 0, wallH / 2, backZ));
+  preview.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, -hallW / 2, wallH / 2, midZ));
+  preview.add(M(new THREE.BoxGeometry(0.4, wallH, depth), plaster, hallW / 2, wallH / 2, midZ));
   const leafW = (hallW - doorW) / 2;
   group.add(paintedWall(leafW, wallH, 0.4, -(hallW / 2 - leafW / 2), wallH / 2, frontZ));
   group.add(paintedWall(leafW, wallH, 0.4, (hallW / 2 - leafW / 2), wallH / 2, frontZ));
@@ -404,26 +423,31 @@ export function buildCourtyard(_scene: THREE.Scene): HallObjects {
   );
   mural.rotation.y = Math.PI;
   mural.castShadow = false;
-  group.add(mural);
-  addFacadeShrine(group, MAIN_HALL, {
+  preview.add(mural);
+  addFacadeShrine(preview, MAIN_HALL, {
     z: depth - 2.2, faceYaw: Math.PI, deityH: 4.4, daisW: 8.4, daisD: 3.6, daisH: 1.7, jobs: giltJobs,
   });
   const lan = new THREE.MeshStandardMaterial({ color: 0xe8a04a, emissive: 0xe07020, emissiveIntensity: 0.85, roughness: 0.4 });
   for (const x of [-3.2, 3.2]) {
-    group.add(M(new THREE.CylinderGeometry(0.18, 0.18, 0.36, 10), lan, x, 7.2, 3.2));
+    preview.add(M(new THREE.CylinderGeometry(0.18, 0.18, 0.36, 10), lan, x, 7.2, 3.2));
     const L = new THREE.PointLight(0xffc070, 2.4, 16, 1.5);
     L.position.set(x, 7.2, 3.2);
-    group.add(L);
+    preview.add(L);
   }
   const deityLight = new THREE.PointLight(0xffe0a0, 3.2, 14, 1.4);
   deityLight.position.set(0, 7.4, depth - 2.4);
-  group.add(deityLight);
+  preview.add(deityLight);
+  preview.add(M(new THREE.BoxGeometry(34, 0.45, depth + 2.2), roof, 0, wallH + 0.5, midZ + 0.2));
+  preview.add(M(new THREE.BoxGeometry(2, 0.7, depth + 1.2), goldM, 0, wallH + 1.15, midZ + 0.2));
+  group.add(preview);
   const mainPl = hangingPlaque("大雄宝殿", 5.0, 1.45);
   mainPl.position.set(0, 9.55, frontZ - 0.32);
   mainPl.rotation.y = Math.PI; // face the courtyard (−Z)
   group.add(mainPl);
-  group.add(M(new THREE.BoxGeometry(34, 0.45, depth + 2.2), roof, 0, wallH + 0.5, midZ + 0.2));
-  group.add(M(new THREE.BoxGeometry(2, 0.7, depth + 1.2), goldM, 0, wallH + 1.15, midZ + 0.2));
+  // A short eave over the façade stays when the shallow preview is hidden
+  // (the real interior then supplies the hall's own roof).
+  group.add(M(new THREE.BoxGeometry(34, 0.45, 3.2), roof, 0, wallH + 0.5, frontZ + 0.6));
+  group.add(M(new THREE.BoxGeometry(2, 0.7, 2.2), goldM, 0, wallH + 1.15, frontZ + 0.4));
   group.add(M(new THREE.BoxGeometry(doorW + 0.4, 0.14, 0.7), darkWood, 0, 0.06, frontZ - 0.2));
   for (let i = 0; i < 4; i++) {
     group.add(M(new THREE.BoxGeometry(9, 0.16, 0.7), mat(0x7a746c), 0, 0.02 + i * 0.12, -0.3 - i * 0.5));
@@ -484,10 +508,11 @@ function buildFacade(
   const doorH = 3.55;
   const frontZ = D / 2;
   const backZ = -D / 2;
-  g.add(M(new THREE.BoxGeometry(W - 0.2, 0.08, D), mat(0x2a1c16, { roughness: 0.75 }), 0, 0.04, 0));
-  g.add(M(new THREE.BoxGeometry(W, H, 0.32), plaster, 0, H / 2, backZ));
-  g.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, -W / 2, H / 2, 0));
-  g.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, W / 2, H / 2, 0));
+  const preview = makeFacadePreview(h.id);
+  preview.add(M(new THREE.BoxGeometry(W - 0.2, 0.08, D), mat(0x2a1c16, { roughness: 0.75 }), 0, 0.04, 0));
+  preview.add(M(new THREE.BoxGeometry(W, H, 0.32), plaster, 0, H / 2, backZ));
+  preview.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, -W / 2, H / 2, 0));
+  preview.add(M(new THREE.BoxGeometry(0.32, H, D), plaster, W / 2, H / 2, 0));
   const leaf = (W - doorW) / 2;
   g.add(paintedWall(leaf, H, 0.32, -(W / 2 - leaf / 2), H / 2, frontZ));
   g.add(paintedWall(leaf, H, 0.32, (W / 2 - leaf / 2), H / 2, frontZ));
@@ -501,18 +526,22 @@ function buildFacade(
     0, H * 0.5, backZ + 0.18,
   );
   mural.castShadow = false;
-  g.add(mural);
-  addFacadeShrine(g, h, {
+  preview.add(mural);
+  addFacadeShrine(preview, h, {
     z: backZ + 1.35, faceYaw: 0, deityH: 2.35, daisW: 3.1, daisD: 1.55, daisH: 0.85, jobs,
   });
   const L = new THREE.PointLight(0xffc070, 1.8, 8, 1.6);
   L.position.set(0, 3.4, 0.2);
-  g.add(L);
+  preview.add(L);
+  preview.add(M(new THREE.BoxGeometry(W + 0.8, 0.28, D + 1.1), roof, 0, H + 0.25, 0));
+  preview.add(M(new THREE.BoxGeometry(0.5, 0.4, D + 0.6), goldM, 0, H + 0.6, 0));
+  g.add(preview);
   const pl = hangingPlaque(h.name, 3.15, 0.95);
   pl.position.set(0, H - 0.5, frontZ + 0.3);
   g.add(pl);
-  g.add(M(new THREE.BoxGeometry(W + 0.8, 0.28, D + 1.1), roof, 0, H + 0.25, 0));
-  g.add(M(new THREE.BoxGeometry(0.5, 0.4, D + 0.6), goldM, 0, H + 0.6, 0));
+  // Front eave remains when the preview is hidden (player is inside this hall).
+  g.add(M(new THREE.BoxGeometry(W + 0.8, 0.28, 1.6), roof, 0, H + 0.25, frontZ - 0.2));
+  g.add(M(new THREE.BoxGeometry(0.5, 0.4, 1.0), goldM, 0, H + 0.6, frontZ - 0.15));
   g.add(M(new THREE.BoxGeometry(doorW, 0.12, 0.6), darkWood, 0, 0.06, frontZ + 0.2));
   // Columns at the door posts only, plus side/back walls. The opening itself is clear
   // so the approach trigger in front of the façade is never blocked.
@@ -739,6 +768,19 @@ export function buildInterior(_scene: THREE.Scene, def: HallDef): HallObjects {
     L.position.set(x, lanY, z);
     group.add(L);
   }
+
+  // Deity key light lives on the interior group so it follows any frame change.
+  const deitySpot = new THREE.SpotLight(0xffe8b0, 4.4, 40, 0.7, 0.45, 1.0);
+  deitySpot.position.set(0, main ? 18 : 13, daisZ - 7);
+  deitySpot.target.position.set(0, 6, daisZ);
+  group.add(deitySpot, deitySpot.target);
+
+  // Warm daylight spilling in through the open door onto the nave floor.
+  const spill = new THREE.SpotLight(0xffe6b8, 3.6, 22, 0.95, 0.55, 1.0);
+  spill.name = "doorSpill";
+  spill.position.set(0, main ? 7.2 : 4.6, -1.2);
+  spill.target.position.set(0, 0.05, 5.5);
+  group.add(spill, spill.target);
 
   // Caller attaches the group (allows off-screen warmup).
   // Background and fog are applied in Game.tuneLights.

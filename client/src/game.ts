@@ -3,8 +3,9 @@ import { RoomEnvironment } from "three/examples/jsm/environments/RoomEnvironment
 import { CSS2DRenderer, CSS2DObject } from "three/addons/renderers/CSS2DRenderer.js";
 import { Client, Room } from "colyseus.js";
 import { Monk, preloadMonks } from "./scene/monk";
-import { buildCourtyard, buildInterior, resolveMove, setCushionOccupied, type HallObjects } from "./scene/hall";
+import { buildCourtyard, buildInterior, resolveMove, setCushionOccupied, setFacadePreviewVisible, type HallObjects } from "./scene/hall";
 import { SUN_POS, DAY_HORIZON, DAY_FOG } from "./scene/exteriorArt";
+import { courtyardTransformIn, transferPoint, transferRot, localToWorld } from "./scene/world";
 import { IncenseField } from "./scene/incenseViz";
 import { makeNametag } from "./scene/fx";
 import { MuyuPanel, BeadsPanel } from "./scene/tools";
@@ -43,6 +44,11 @@ interface PlayerView {
   ritualPhase?: number; ritualStartedAt?: number;
 }
 
+interface CrossingFrame {
+  t: number; frameMs: number; hallId: string;
+  x: number; z: number; camX: number; camY: number; camZ: number;
+}
+
 export class Game {
   room!: Room;
   audio: TempleAudio;
@@ -50,7 +56,7 @@ export class Game {
   private renderer: THREE.WebGLRenderer;
   private labelRenderer: CSS2DRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(60, 1, 0.1, 200);
+  private camera = new THREE.PerspectiveCamera(60, 1, 0.1, 280);
   private clock = new THREE.Clock();
   private hall!: HallObjects;
   private incense = new IncenseField();
@@ -81,6 +87,7 @@ export class Game {
   private camFrozen: { x: number; y: number; z: number; lx: number; ly: number; lz: number } | null = null;
   private leaving = false;
   private doorCooldown = 0;
+  private doorCooldownUntil = 0;
   private hallId: HallId = "courtyard";
   private myQueueBurner = "";
   private myQueueSlot = -1;
@@ -98,6 +105,12 @@ export class Game {
   private hallCache = new Map<HallId, HallObjects>();
   private warming: HallId | null = null;
   private enterMarks: Record<string, number> = {};
+  private preserveWorldPose = false;
+  private crossingFrames: CrossingFrame[] = [];
+  private crossingUntil = 0;
+  private lastRaf = 0;
+  private lightBlend = 0;
+  private courtIncense: { id: string; x: number; z: number; litAt: number; burnerId?: string }[] = [];
   private sun!: THREE.DirectionalLight;
   private spot!: THREE.SpotLight;
   private fill!: THREE.DirectionalLight;
@@ -181,18 +194,94 @@ export class Game {
 
   /** Swap the visible hall immediately. Cached scenes are reused as-is. */
   private showHall(id: HallId, spawn?: { x: number; z: number; rotY: number }) {
-    if (this.hall && this.hall.group.parent && this.hall.hallId !== id) {
-      this.scene.remove(this.hall.group);
+    this.activateHall(id, spawn ? { snap: spawn } : undefined);
+  }
+
+  /**
+   * Make `id` the active (collision / lighting / network) hall.
+   * Courtyard and the main hall stay in one shared frame (identity).
+   * Side halls remapped the courtyard and the camera in the same frame so
+   * the view does not jump. Pass `snap` only for debug teleports.
+   */
+  private activateHall(id: HallId, opts?: { snap?: { x: number; z: number; rotY: number } }) {
+    const from = this.hallId;
+    const px = this.localGroup.position.x;
+    const py = this.localGroup.position.y;
+    const pz = this.localGroup.position.z;
+    const rot = this.localGroup.rotation.y;
+    const cam = this.camera.position.clone();
+    const piv = this.camPivot.clone();
+    const dest = this.controls.dest ? this.controls.dest.clone() : null;
+
+    if (this.hall && this.hall.hallId !== "courtyard" && this.hall.hallId !== id && this.hall.hallId !== "main") {
+      this.hall.group.visible = false;
+      if (this.hall.group.parent) this.scene.remove(this.hall.group);
     }
+
     this.hallId = id;
     this.hall = this.getOrBuildHall(id);
-    this.hall.group.visible = true;
-    if (!this.hall.group.parent) this.scene.add(this.hall.group);
-    this.tuneLights();
-    if (spawn) {
-      this.localGroup.position.set(spawn.x, 0, spawn.z);
-      this.localGroup.rotation.y = spawn.rotY;
+
+    const court = this.getOrBuildHall("courtyard");
+    if (!court.group.parent) this.scene.add(court.group);
+    court.group.visible = true;
+    if (this.incense.group.parent !== court.group) court.group.add(this.incense.group);
+    if (this.sun.parent !== court.group) court.group.add(this.sun);
+
+    if (id === "courtyard") {
+      this.hall.group.visible = true;
+      if (!this.hall.group.parent) this.scene.add(this.hall.group);
+      this.applyExteriorFrame("courtyard");
+      const main = this.hallCache.get("main");
+      if (main) {
+        main.group.position.set(0, 0, 0);
+        main.group.rotation.set(0, 0, 0);
+        main.group.visible = true;
+        if (!main.group.parent) this.scene.add(main.group);
+      }
+    } else {
+      this.hall.group.position.set(0, 0, 0);
+      this.hall.group.rotation.set(0, 0, 0);
+      this.hall.group.visible = true;
+      if (!this.hall.group.parent) this.scene.add(this.hall.group);
+      this.applyExteriorFrame(id);
+    }
+    this.syncFacadePreviews();
+
+    if (opts?.snap) {
+      this.localGroup.position.set(opts.snap.x, 0, opts.snap.z);
+      this.localGroup.rotation.y = opts.snap.rotY;
       this.controls.dest = null;
+    } else if (from !== id) {
+      const np = transferPoint(from, id, px, py, pz);
+      this.localGroup.position.set(np.x, np.y, np.z);
+      this.localGroup.rotation.y = transferRot(from, id, rot);
+      const nc = transferPoint(from, id, cam.x, cam.y, cam.z);
+      this.camera.position.set(nc.x, nc.y, nc.z);
+      const nv = transferPoint(from, id, piv.x, piv.y, piv.z);
+      this.camPivot.set(nv.x, nv.y, nv.z);
+      if (dest) {
+        const nd = transferPoint(from, id, dest.x, dest.y, dest.z);
+        this.controls.dest = new THREE.Vector3(nd.x, nd.y, nd.z);
+      }
+    }
+    this.tuneLights();
+  }
+
+  private applyExteriorFrame(id: HallId) {
+    const court = this.hallCache.get("courtyard");
+    if (!court) return;
+    const t = courtyardTransformIn(id);
+    court.group.position.set(t.x, 0, t.z);
+    court.group.rotation.set(0, t.rotY, 0);
+    court.group.updateMatrixWorld(true);
+  }
+
+  private syncFacadePreviews() {
+    const court = this.hallCache.get("courtyard");
+    if (!court) return;
+    setFacadePreviewVisible(court.group, "main", !this.hallCache.has("main"));
+    for (const h of SIDE_HALLS) {
+      setFacadePreviewVisible(court.group, h.id, this.hallId !== h.id);
     }
   }
 
@@ -211,9 +300,9 @@ export class Game {
   }
 
   private async compileHall(hall: HallObjects) {
-    const orphan = !hall.group.parent;
+    const wasOrphan = !hall.group.parent;
     try {
-      if (orphan) {
+      if (wasOrphan) {
         hall.group.visible = false;
         this.scene.add(hall.group);
       }
@@ -223,9 +312,15 @@ export class Game {
       if (r.compileAsync) await r.compileAsync(hall.group, this.camera);
       else r.compile(hall.group, this.camera);
     } catch { /* compile is a best-effort warmup */ }
-    if (this.hall?.group === hall.group) {
+    // Main hall and courtyard stay in the shared scene so the open door
+    // shows the other side. Only detach a hall we attached solely to compile.
+    const keep = hall.hallId === "main" || hall.hallId === "courtyard"
+      || this.hall?.group === hall.group || this.hallId === hall.hallId;
+    if (keep) {
       hall.group.visible = true;
-    } else if (orphan && hall.group.parent === this.scene) {
+      if (!hall.group.parent) this.scene.add(hall.group);
+      this.syncFacadePreviews();
+    } else if (wasOrphan && hall.group.parent === this.scene) {
       this.scene.remove(hall.group);
       hall.group.visible = true;
     }
@@ -236,7 +331,15 @@ export class Game {
     this.warming = id;
     try {
       const hall = this.getOrBuildHall(id);
-      if (this.hallId !== id && hall.group.parent) this.scene.remove(hall.group);
+      if (id === "main") {
+        hall.group.position.set(0, 0, 0);
+        hall.group.rotation.set(0, 0, 0);
+        hall.group.visible = true;
+        if (!hall.group.parent) this.scene.add(hall.group);
+        this.syncFacadePreviews();
+      } else if (this.hallId !== id && hall.group.parent) {
+        this.scene.remove(hall.group);
+      }
     } finally {
       this.warming = null;
     }
@@ -258,7 +361,7 @@ export class Game {
     for (const h of SIDE_HALLS) {
       if (this.hallCache.has(h.id)) continue;
       const d = Math.hypot(x - h.x, z - h.z);
-      if (d < 9) {
+      if (d < 14) {
         this.warmHall(h.id);
         return;
       }
@@ -298,7 +401,6 @@ export class Game {
       await join;
     } finally {
       this.leaving = false;
-      this.doorCooldown = 1.2;
       this.schedulePreload();
     }
   }
@@ -344,45 +446,35 @@ export class Game {
   }
 
   private tuneLights() {
-    if (this.hallId === "courtyard") {
-      this.renderer.toneMappingExposure = 1.28;
-      this.scene.background = new THREE.Color(DAY_HORIZON);
-      this.scene.fog = new THREE.Fog(DAY_FOG, 55, 130);
-      this.hemi.color.setHex(0x9ec5ee);
-      this.hemi.groundColor.setHex(0xd9c3a0);
-      this.hemi.intensity = 1.05;
-      this.ambient.color.setHex(0xfff0d8);
-      this.ambient.intensity = 0.68;
-      this.sun.color.setHex(0xffe6b8);
-      this.sun.intensity = 2.15;
-      this.sun.position.copy(SUN_POS);
-      this.fill.color.setHex(0xffe8d0);
-      this.fill.intensity = 0.28;
-      this.fill.position.set(-10, 12, -8);
-      this.spot.intensity = 0;
-      this.scene.environmentIntensity = 0.55;
-    } else {
-      this.renderer.toneMappingExposure = 1.05;
-      this.scene.background = new THREE.Color(0x140f0e);
-      this.scene.fog = new THREE.Fog(0x140f0e, 22, 48);
-      this.hemi.color.setHex(0xffe0c0);
-      this.hemi.groundColor.setHex(0x2a1810);
-      this.hemi.intensity = 0.42;
-      this.ambient.color.setHex(0x4a3020);
-      this.ambient.intensity = 0.38;
-      this.sun.color.setHex(0xffd0a8);
-      this.sun.intensity = 0.45;
-      this.sun.position.set(-8, 16, 4);
-      this.fill.color.setHex(0xffe8d0);
-      this.fill.intensity = 0.32;
-      this.fill.position.set(4, 10, 6);
-      this.spot.intensity = 4.6;
-      const targetZ = this.hallId === "main" ? 21.4 : 16.4;
-      this.spot.position.set(0, this.hallId === "main" ? 18 : 13, targetZ - 7);
-      this.spot.target.position.set(0, 6, targetZ);
-      this.spot.target.updateMatrixWorld();
-      this.scene.environmentIntensity = 0.42;
-    }
+    // Daylight is always the scene backdrop so an open door never looks into
+    // a black void. Indoor feel comes from a soft blend (see updateLighting)
+    // and from the hall's own lanterns / deity spot / door spill.
+    this.scene.background = new THREE.Color(DAY_HORIZON);
+    this.scene.fog = new THREE.Fog(DAY_FOG, 70, 150);
+    this.hemi.color.setHex(0x9ec5ee);
+    this.hemi.groundColor.setHex(0xd9c3a0);
+    this.ambient.color.setHex(0xfff0d8);
+    this.sun.color.setHex(0xffe6b8);
+    this.sun.position.copy(SUN_POS);
+    this.fill.color.setHex(0xffe8d0);
+    this.fill.position.set(-10, 12, -8);
+    this.spot.intensity = 0; // per-interior spots live on the hall group
+    this.updateLighting(1);
+  }
+
+  private updateLighting(dt: number) {
+    const target = this.hallId === "courtyard"
+      ? 0
+      : Math.min(1, Math.max(0, (this.localGroup.position.z - 0.8) / 9));
+    const k = dt >= 0.99 ? 1 : 1 - Math.exp(-3.2 * Math.max(dt, 1 / 60));
+    this.lightBlend += (target - this.lightBlend) * k;
+    const u = this.lightBlend;
+    this.renderer.toneMappingExposure = 1.28 - 0.14 * u;
+    this.hemi.intensity = 1.05 - 0.4 * u;
+    this.ambient.intensity = 0.68 - 0.2 * u;
+    this.sun.intensity = 2.15 - 0.35 * u;
+    this.fill.intensity = 0.28;
+    this.scene.environmentIntensity = 0.55 - 0.1 * u;
   }
 
   private bindRoom() {
@@ -401,8 +493,10 @@ export class Game {
         // Colyseus may fire onAdd for players already visited by forEach;
         // never attach a second local mesh.
         if (this.localMonk) {
-          this.localGroup.position.set(p.x, 0, p.z);
-          this.localGroup.rotation.y = p.rotY;
+          if (!this.preserveWorldPose) {
+            this.localGroup.position.set(p.x, 0, p.z);
+            this.localGroup.rotation.y = p.rotY;
+          }
           return;
         }
         this.localMonk = new Monk(p.look);
@@ -490,7 +584,12 @@ export class Game {
     document.getElementById("online")!.textContent = `在线 ${st.players?.size ?? 0}`;
     const inc: { id: string; x: number; z: number; litAt: number; burnerId?: string }[] = [];
     st.incenses?.forEach((v) => inc.push(v));
-    this.incense.sync(inc);
+    if (this.hallId === "courtyard") {
+      this.courtIncense = inc;
+      this.incense.sync(inc);
+    }
+    // Inside a hall, leave the last courtyard incense parented to the yard
+    // so sticks stay visible through the open door.
     if (this.hall?.cushions && st.cushions) {
       for (let i = 0; i < st.cushions.length; i++) {
         setCushionOccupied(this.hall.cushions, i, !!st.cushions[i]);
@@ -603,7 +702,10 @@ export class Game {
     this.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     this.raycaster.setFromCamera(this.ndc, this.camera);
-    const floors = this.raycaster.intersectObjects(this.hall.floorMeshes, false);
+    const floorsSrc = this.hall.floorMeshes.slice();
+    const court = this.hallCache.get("courtyard");
+    if (court && this.hallId !== "courtyard") floorsSrc.push(...court.floorMeshes);
+    const floors = this.raycaster.intersectObjects(floorsSrc, false);
     if (floors[0]) this.controls.dest = floors[0].point.clone();
   }
 
@@ -621,47 +723,114 @@ export class Game {
   }
 
   private async tryEnterDoor() {
-    if (!this.nearDoor || this.leaving || this.doorCooldown > 0) return;
+    if (!this.nearDoor || this.leaving || this.doorCooling()) return;
     const dest = this.nearDoor;
     this.leaving = true;
+    this.preserveWorldPose = true;
     this.enterMarks = { trigger: Math.round(performance.now()) };
+    this.beginCrossingSample();
     const destId: HallId = dest.room === "courtyard" ? "courtyard" : dest.hallId;
-    const spawn = dest.room === "courtyard"
-      ? (hallById(this.hallId) ? courtyardSpawnFrom(hallById(this.hallId)!) : { x: 0, z: -5, rotY: Math.PI })
-      : interiorSpawn(dest.hallId);
-    this.setFadeLabel(dest.room === "courtyard" ? "出殿" : "入殿");
-    const fadeOut = this.fadeDoor(1, 250);
+    // Visual switch this frame, at the same (transferred) position. No fade,
+    // no teleport. The Colyseus join runs in the background.
+    this.activateHall(destId);
+    this.markEnter("hallShown");
+    this.markEnter("fadeClear");
+    this.armDoorCooldown(500);
     const join = this.connectRoom(dest.room, {
-      name: this.myName, look: this.myLook, x: spawn.x, z: spawn.z, rotY: spawn.rotY,
+      name: this.myName, look: this.myLook,
+      x: this.localGroup.position.x,
+      z: this.localGroup.position.z,
+      rotY: this.localGroup.rotation.y,
     });
-    const cached = this.hallCache.has(destId);
-    // Cached halls can swap under the veil immediately so fade-in starts at 250ms.
-    if (cached) {
-      this.showHall(destId, spawn);
-      this.markEnter("hallShown");
-    }
-    // Never wait on the room join or a long build for the veil to lift.
-    await Promise.race([fadeOut, new Promise<void>((r) => setTimeout(r, 300))]);
-    if (!cached) {
-      this.showHall(destId, spawn);
-      this.markEnter("hallShown");
-    }
-    this.doorCooldown = 1.0;
-    const fadeIn = this.fadeDoor(0, 280);
     try {
       await join;
       this.markEnter("joinDone");
+      this.room?.send("move", {
+        x: this.localGroup.position.x,
+        z: this.localGroup.position.z,
+        rotY: this.localGroup.rotation.y,
+      });
     } catch (err) {
       this.leaving = false;
-      await fadeIn;
+      this.preserveWorldPose = false;
       this.toast("未能入殿，请稍后再试");
       console.warn(err);
       return;
     }
     this.leaving = false;
-    await fadeIn;
-    this.markEnter("fadeClear");
+    this.preserveWorldPose = false;
     if (destId === "courtyard") this.schedulePreload();
+  }
+
+  /** Door cooldown in real milliseconds so a slow frame budget cannot stretch it. */
+  private armDoorCooldown(ms: number) {
+    this.doorCooldown = ms / 1000;
+    this.doorCooldownUntil = ms > 0 ? performance.now() + ms : 0;
+  }
+
+  private doorCooling(): boolean {
+    if (this.doorCooldownUntil <= 0) {
+      this.doorCooldown = 0;
+      return false;
+    }
+    const left = this.doorCooldownUntil - performance.now();
+    this.doorCooldown = Math.max(0, left / 1000);
+    if (left <= 0) this.doorCooldownUntil = 0;
+    return left > 0;
+  }
+
+  private beginCrossingSample() {
+    this.crossingFrames = [];
+    this.crossingUntil = performance.now() + 1800;
+  }
+
+  private sampleCrossing(frameMs: number) {
+    if (performance.now() > this.crossingUntil && this.crossingFrames.length > 0) return;
+    if (performance.now() > this.crossingUntil) return;
+    this.crossingFrames.push({
+      t: Math.round(performance.now()),
+      frameMs: Math.round(frameMs * 10) / 10,
+      hallId: this.hallId,
+      x: this.localGroup.position.x,
+      z: this.localGroup.position.z,
+      camX: this.camera.position.x,
+      camY: this.camera.position.y,
+      camZ: this.camera.position.z,
+    });
+  }
+
+  private crossingSummary() {
+    const frames = this.crossingFrames;
+    const ms = frames.map((f) => f.frameMs);
+    const maxFrame = ms.length ? Math.max(...ms) : 0;
+    const sorted = [...ms].sort((a, b) => a - b);
+    const p95 = sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))] : 0;
+    let maxJump = 0;
+    let maxCam = 0;
+    for (let i = 1; i < frames.length; i++) {
+      const dt = Math.max(0.001, frames[i].frameMs / 1000);
+      const jump = Math.hypot(frames[i].x - frames[i - 1].x, frames[i].z - frames[i - 1].z);
+      // Excess over a generous walk step (speed 4.3 + a little slack).
+      const excess = Math.max(0, jump - 4.3 * dt - 0.08);
+      if (excess > maxJump) maxJump = excess;
+      const cam = Math.hypot(
+        frames[i].camX - frames[i - 1].camX,
+        frames[i].camY - frames[i - 1].camY,
+        frames[i].camZ - frames[i - 1].camZ,
+      );
+      const camEx = Math.max(0, cam - 8 * dt - 0.1);
+      if (camEx > maxCam) maxCam = camEx;
+    }
+    return {
+      maxFrame: Math.round(maxFrame * 10) / 10,
+      p95: Math.round(p95 * 10) / 10,
+      over33: ms.filter((v) => v > 33).length,
+      over50: ms.filter((v) => v > 50).length,
+      maxJump: Math.round(maxJump * 1000) / 1000,
+      maxCamJump: Math.round(maxCam * 1000) / 1000,
+      n: frames.length,
+      hallIds: [...new Set(frames.map((f) => f.hallId))],
+    };
   }
 
   private setFadeLabel(text: string) {
@@ -682,40 +851,67 @@ export class Game {
   private loop = () => {
     if (!this.running) return;
     requestAnimationFrame(this.loop);
+    const now = performance.now();
+    const frameMs = this.lastRaf ? now - this.lastRaf : 16;
+    this.lastRaf = now;
     const dt = Math.min(0.05, this.clock.getDelta());
     this.updateLocal(dt);
     this.updateRemotes(dt);
     this.updateCamera(dt);
+    this.updateLighting(dt);
     this.incense.update(dt);
     this.muyuPanel.update(dt);
     this.beads.update(dt);
     this.updateProximity();
     this.maybeWarmNearby();
-    if (this.doorCooldown > 0) this.doorCooldown = Math.max(0, this.doorCooldown - dt);
+    this.updateAutoDoor(dt);
     this.renderer.render(this.scene, this.camera);
     this.labelRenderer.render(this.scene, this.camera);
-    this.updateAutoDoor(dt);
+    this.sampleCrossing(frameMs);
+    this.lastPose = {
+      x: this.localGroup.position.x,
+      z: this.localGroup.position.z,
+      rotY: this.localGroup.rotation.y,
+    };
   };
 
   private updateAutoDoor(_dt: number) {
-    if (this.sitting || this.leaving || this.doorCooldown > 0) return;
+    if (this.sitting || this.leaving || this.doorCooling()) return;
     // Queue is only for offering incense; walking into a door without
     // joining a queue still enters the hall. While queued or ritually
-    // locked, do not auto-enter (after the ritual we call tryEnterDoor directly).
+    // locked, do not auto-enter (after the ritual we auto-walk to the door).
     if (this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE) return;
     if (this.myQueueSlot >= 0) return;
     const x = this.localGroup.position.x;
     const z = this.localGroup.position.z;
+    const dx = x - this.lastPose.x;
+    const dz = z - this.lastPose.z;
     if (this.hallId === "courtyard") {
       const hit = courtyardDoorHit(x, z);
       if (hit) {
-        this.nearDoor = { name: hit.name, room: hit.room, hallId: hit.id };
-        void this.tryEnterDoor();
+        // Only fire when moving into the building, so standing on the
+        // threshold or walking out does not bounce.
+        const fx = Math.sin(hit.rotY), fz = Math.cos(hit.rotY);
+        const inward = -(dx * fx + dz * fz);
+        if (inward > 0.001 || (this.controls.dest && this.towardDestInward(hit))) {
+          this.nearDoor = { name: hit.name, room: hit.room, hallId: hit.id };
+          void this.tryEnterDoor();
+        }
       }
     } else if (interiorExitHit(x, z, this.hallId)) {
-      this.nearDoor = { name: "山门庭院", room: "courtyard", hallId: "courtyard" };
-      void this.tryEnterDoor();
+      if (dz < -0.001 || (this.controls.dest && this.controls.dest.z < z)) {
+        this.nearDoor = { name: "山门庭院", room: "courtyard", hallId: "courtyard" };
+        void this.tryEnterDoor();
+      }
     }
+  }
+
+  private towardDestInward(hit: { rotY: number }): boolean {
+    if (!this.controls.dest) return false;
+    const dx = this.controls.dest.x - this.localGroup.position.x;
+    const dz = this.controls.dest.z - this.localGroup.position.z;
+    const fx = Math.sin(hit.rotY), fz = Math.cos(hit.rotY);
+    return -(dx * fx + dz * fz) > 0;
   }
 
   private updateLocal(dt: number) {
@@ -776,11 +972,6 @@ export class Game {
     this.localMonk.update(dt, moving, this.sitting);
     if (this.localTag) this.localTag.position.y = this.localMonk.crownY();
 
-    this.lastPose = {
-      x: this.localGroup.position.x,
-      z: this.localGroup.position.z,
-      rotY: this.localGroup.rotation.y,
-    };
     this.sendAcc += dt;
     if (this.sendAcc >= 1 / 15 && this.room && !this.leaving && !ritualLock) {
       this.sendAcc = 0;
@@ -971,13 +1162,12 @@ export class Game {
     this.myQueueSlot = -1;
     this.myQueueBurner = "";
     if (this.localMonk) this.localMonk.setRitual(0, 0);
-    this.nearDoor = { name: h.name, room: h.room, hallId: h.id };
-    this.doorCooldown = 0;
-    try {
-      await this.tryEnterDoor();
-    } finally {
-      this.ritualEnterPending = false;
-    }
+    // Walk through the open door; the regular threshold trigger does the
+    // seamless room switch. Destination is in the current (courtyard) frame.
+    const inside = localToWorld(h.id, 0, 3.2);
+    this.controls.dest = new THREE.Vector3(inside.x, 0, inside.z);
+    this.armDoorCooldown(0);
+    this.ritualEnterPending = false;
   }
 
   private startUpdateWatch() {
@@ -1073,6 +1263,12 @@ export class Game {
       hallId: () => string;
       hallCached: (id: string) => boolean;
       enterTiming: () => Record<string, number>;
+      crossingStats: () => {
+        maxFrame: number; p95: number; over33: number; over50: number;
+        maxJump: number; maxCamJump: number; n: number; hallIds: string[];
+      };
+      beginCrossingSample: () => void;
+      doorDebug: () => Record<string, unknown>;
       statuesReady: () => Promise<void>;
       setAnim: (opts: { moving?: boolean | null; sitting?: boolean | null; phase?: number | null }) => void;
       sitOnCushion: (id?: number) => void;
@@ -1134,6 +1330,19 @@ export class Game {
     w.hallId = () => this.hallId;
     w.hallCached = (id) => this.hallCache.has(id as HallId);
     w.enterTiming = () => ({ ...this.enterMarks });
+    w.crossingStats = () => this.crossingSummary();
+    w.beginCrossingSample = () => this.beginCrossingSample();
+    w.doorDebug = () => ({
+      leaving: this.leaving,
+      cooldown: Math.round(this.doorCooldown * 1000) / 1000,
+      hallId: this.hallId,
+      nearDoor: this.nearDoor,
+      sitting: this.sitting,
+      queue: this.myQueueSlot,
+      ritual: this.myRitualPhase,
+      lastPose: { ...this.lastPose },
+      pos: { x: this.localGroup.position.x, z: this.localGroup.position.z },
+    });
     w.statuesReady = () => this.hall?.statuesReady ?? Promise.resolve();
     w.setAnim = (opts) => {
       if (opts.sitting !== undefined && opts.sitting !== null) {

@@ -13,8 +13,11 @@
     "test:queue": "tsx test/incense-queue-test.ts",
     "test:door": "tsx test/door-test.ts",
     "test:update": "tsx test/update-test.ts",
+    "test:world": "tsx test/world-test.ts",
+    "test:cross": "tsx test/cross-timing.ts",
     "screenshot": "tsx test/screenshot.ts",
-    "screenshot:15": "tsx test/screenshot-round15.ts"
+    "screenshot:15": "tsx test/screenshot-round15.ts",
+    "screenshot:16": "tsx test/screenshot-round16.ts"
   },
   "dependencies": {
     "@colyseus/schema": "^2.0.36",

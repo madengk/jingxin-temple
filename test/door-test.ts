@@ -24,7 +24,8 @@ function almost(a: number, b: number, eps = 0.08) {
 
 console.log("door geometry");
 
-check("main steps are a door trigger", courtyardDoorHit(0, -1.0)?.id === "main");
+check("main steps are not yet a door trigger", courtyardDoorHit(0, -1.0) === undefined);
+check("main threshold is a door trigger", courtyardDoorHit(0, -0.1)?.id === "main");
 check("main mid-courtyard is not a trigger", courtyardDoorHit(0, -8) === undefined);
 check("main at burner front is not a trigger", courtyardDoorHit(0, -2.4) === undefined);
 check("main opening is walkable up to the steps", (() => {
@@ -37,10 +38,15 @@ const frontG = hallFrontDistance(guanyin);
 // Façade is at forward=frontG; a point 1 unit in front of it should trigger.
 const fx = Math.sin(guanyin.rotY), fz = Math.cos(guanyin.rotY);
 const approach = {
-  x: guanyin.x + fx * (frontG + 1.0),
-  z: guanyin.z + fz * (frontG + 1.0),
+  x: guanyin.x + fx * (frontG + 0.25),
+  z: guanyin.z + fz * (frontG + 0.25),
 };
-check("观音殿 approach triggers", courtyardDoorHit(approach.x, approach.z)?.id === "guanyin");
+check("观音殿 threshold triggers", courtyardDoorHit(approach.x, approach.z)?.id === "guanyin");
+const early = {
+  x: guanyin.x + fx * (frontG + 1.2),
+  z: guanyin.z + fz * (frontG + 1.2),
+};
+check("观音殿 1.2m in front is not a trigger", courtyardDoorHit(early.x, early.z) === undefined);
 
 
 const spawnC = courtyardSpawnFrom(MAIN_HALL);
@@ -56,7 +62,8 @@ for (const h of SIDE_HALLS) {
 
 const inside = interiorSpawn("main");
 check("interior spawn is past the exit trigger", !interiorExitHit(inside.x, inside.z, "main"));
-check("walking to the interior door exits", interiorExitHit(0, 0.5, "main"));
+check("walking to the interior door exits", interiorExitHit(0, 0.2, "main"));
+check("mid-nave is not yet an exit", !interiorExitHit(0, 0.5, "main"));
 check("far from the interior door does not exit", !interiorExitHit(0, 6, "main"));
 
 console.log("collision slide");
@@ -70,7 +77,7 @@ for (; steps < 240; steps++) {
   const r = resolveMove(x, z, x, rawZ, [burner], PLAYER_RADIUS);
   const c = clampToWalkable(r.x, r.z, "courtyard");
   x = c.x; z = c.z;
-  if (z > -1.55 && Math.abs(x) < 3.8) { gotAround = true; break; }
+  if (z > -0.25 && Math.abs(x) < 3.8) { gotAround = true; break; }
 }
 check(`walking +Z from (0,-6) clears the burner and reaches the door in ${steps} frames`, gotAround && steps < 180, `x=${x.toFixed(2)} z=${z.toFixed(2)} steps=${steps}`);
 
