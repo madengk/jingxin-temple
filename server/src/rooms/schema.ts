@@ -1,4 +1,5 @@
 import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
+import { BUILD_VERSION } from "../shared";
 
 export class Player extends Schema {
   @type("string") id = "";
@@ -10,6 +11,14 @@ export class Player extends Schema {
   @type("boolean") sitting = false;
   @type("int16") cushionId = -1;
   @type("uint8") look = 0;
+  /** Burner id if currently in that burner's incense queue; else "". */
+  @type("string") queueBurner = "";
+  /** 0 = offering spot; -1 = not in a queue. */
+  @type("int16") queueSlot = -1;
+  /** See RITUAL_PHASE in shared.ts. 0 = none. */
+  @type("uint8") ritualPhase = 0;
+  /** Server Unix ms when the current incense ritual started; 0 if none. */
+  @type("float64") ritualStartedAt = 0;
 }
 
 export class Incense extends Schema {
@@ -22,12 +31,23 @@ export class Incense extends Schema {
   @type("float64") litAt = 0;
 }
 
+/** Single-file incense queue in front of one courtyard burner. */
+export class BurnerQueue extends Schema {
+  @type("string") burnerId = "";
+  /** sessionIds, front (offering) first. */
+  @type(["string"]) lineup = new ArraySchema<string>();
+  /** sessionId currently performing the ritual, or "". */
+  @type("string") ritualSid = "";
+}
+
 export class HallState extends Schema {
   @type("string") hallId = "courtyard";
+  @type("string") buildVersion = BUILD_VERSION;
   @type({ map: Player }) players = new MapSchema<Player>();
   /** sessionId of occupant, or "" if empty. Empty in the courtyard. */
   @type(["string"]) cushions = new ArraySchema<string>();
   @type({ map: Incense }) incenses = new MapSchema<Incense>();
+  @type({ map: BurnerQueue }) queues = new MapSchema<BurnerQueue>();
 }
 
 /** Back-compat alias. */

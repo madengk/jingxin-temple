@@ -10,7 +10,11 @@
     "build": "vite build --config client/vite.config.ts",
     "start": "NODE_ENV=production tsx server/src/index.ts",
     "test:sync": "tsx test/sync-test.ts",
-    "screenshot": "tsx test/screenshot.ts"
+    "test:queue": "tsx test/incense-queue-test.ts",
+    "test:door": "tsx test/door-test.ts",
+    "test:update": "tsx test/update-test.ts",
+    "screenshot": "tsx test/screenshot.ts",
+    "screenshot:15": "tsx test/screenshot-round15.ts"
   },
   "dependencies": {
     "@colyseus/schema": "^2.0.36",

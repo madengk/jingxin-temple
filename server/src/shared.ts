@@ -369,3 +369,122 @@ export const HALL_BOUNDS = COURTYARD_BOUNDS;
 export const DAIS = MAIN_DAIS;
 export const CUSHION_ORIGIN_Z_MAIN = MAIN_CUSHION_ORIGIN_Z;
 export const MAX_INCENSE = MAX_INCENSE_PER_BURNER;
+
+/** Current client/server build id — must match <html data-version>. */
+export const BUILD_VERSION = "round15-incense-queue-20261113";
+
+/** Distance from burner centre to the offering (front-of-queue) stand point, into the courtyard. */
+export const OFFER_DISTANCE = 1.45;
+/** Spacing between queued monks, single-file, further into the courtyard. */
+export const QUEUE_SLOT_SPACING = 1.2;
+/** Walk this far from your assigned slot and you leave the queue. */
+export const QUEUE_LEAVE_DISTANCE = 5.5;
+
+export const RITUAL_PHASE = {
+  NONE: 0,
+  RAISE: 1,
+  BOW1: 2,
+  BOW2: 3,
+  BOW3: 4,
+  PLANT: 5,
+  DONE: 6,
+} as const;
+
+/** Duration of each ritual phase, indexed by RITUAL_PHASE value. NONE is 0. */
+export const RITUAL_PHASE_MS = [0, 500, 900, 900, 900, 1200, 500] as const;
+
+export function ritualPlantAtMs(): number {
+  // Stick is planted at the end of the PLANT phase.
+  return (
+    RITUAL_PHASE_MS[RITUAL_PHASE.RAISE] +
+    RITUAL_PHASE_MS[RITUAL_PHASE.BOW1] +
+    RITUAL_PHASE_MS[RITUAL_PHASE.BOW2] +
+    RITUAL_PHASE_MS[RITUAL_PHASE.BOW3] +
+    RITUAL_PHASE_MS[RITUAL_PHASE.PLANT]
+  );
+}
+
+export function ritualDoneAtMs(): number {
+  return ritualPlantAtMs() + RITUAL_PHASE_MS[RITUAL_PHASE.DONE];
+}
+
+/** Discrete ritual phase for an elapsed time since ritual start. 0 if not started / already finished. */
+export function ritualPhaseAt(elapsedMs: number): number {
+  if (elapsedMs < 0) return RITUAL_PHASE.NONE;
+  let t = 0;
+  for (let p = RITUAL_PHASE.RAISE; p <= RITUAL_PHASE.DONE; p++) {
+    t += RITUAL_PHASE_MS[p];
+    if (elapsedMs < t) return p;
+  }
+  return RITUAL_PHASE.DONE;
+}
+
+export function ritualFinished(elapsedMs: number): boolean {
+  return elapsedMs >= ritualDoneAtMs();
+}
+
+/** Courtyard-ward unit vector from a burner (away from its hall) and the yaw to face the hall. */
+export function burnerQueueAxis(b: BurnerDef): { ox: number; oz: number; rotY: number } {
+  const h = hallById(b.hallId);
+  if (!h) return { ox: 0, oz: -1, rotY: 0 };
+  const ox = Math.sin(h.rotY);
+  const oz = Math.cos(h.rotY);
+  return { ox, oz, rotY: h.rotY + Math.PI };
+}
+
+/** World pose for lineup slot 0 (offering) … n, standing in a column behind the burner. */
+export function queueSlotPose(
+  burner: BurnerDef,
+  slot: number,
+): { x: number; z: number; rotY: number } {
+  const { ox, oz, rotY } = burnerQueueAxis(burner);
+  const dist = OFFER_DISTANCE + Math.max(0, slot) * QUEUE_SLOT_SPACING;
+  return {
+    x: burner.x + ox * dist,
+    z: burner.z + oz * dist,
+    rotY,
+  };
+}
+
+/** How many people stand in front of this slot index. */
+export function queueAhead(slot: number): number {
+  return Math.max(0, slot);
+}
+
+/** Half-width of the queue corridor, perpendicular to the lineup. */
+export const QUEUE_JOIN_HALF_WIDTH = 1.6;
+/** Extra length past the next free slot where a newcomer may still join. */
+export const QUEUE_JOIN_EXTRA = 2.2;
+
+/** True if (x,z) is in this burner's queue corridor (or classic incense range). */
+export function inQueueApproach(x: number, z: number, burner: BurnerDef, lineupLen = 0): boolean {
+  const { ox, oz } = burnerQueueAxis(burner);
+  const dx = x - burner.x;
+  const dz = z - burner.z;
+  const along = dx * ox + dz * oz;
+  const side = dx * (-oz) + dz * ox;
+  const maxAlong = OFFER_DISTANCE + Math.max(0, lineupLen) * QUEUE_SLOT_SPACING + QUEUE_JOIN_EXTRA;
+  if (Math.abs(side) <= QUEUE_JOIN_HALF_WIDTH && along >= -0.8 && along <= maxAlong) return true;
+  return dist2(x, z, burner.x, burner.z) <= (burner.radius + 0.4) * (burner.radius + 0.4);
+}
+
+/** Nearest courtyard burner whose queue corridor contains this point. */
+export function nearestQueueBurner(
+  x: number,
+  z: number,
+  hallId: HallId,
+  lineupLen: (id: string) => number = () => 0,
+): BurnerDef | undefined {
+  if (hallId !== "courtyard") return undefined;
+  let best: BurnerDef | undefined;
+  let bestD = Infinity;
+  for (const b of BURNERS) {
+    if (!inQueueApproach(x, z, b, lineupLen(b.id))) continue;
+    const d = dist2(x, z, b.x, b.z);
+    if (d < bestD) {
+      bestD = d;
+      best = b;
+    }
+  }
+  return best;
+}

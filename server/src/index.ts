@@ -8,7 +8,7 @@ import wst from "@colyseus/ws-transport";
 const { Server, matchMaker } = colyseus;
 const { WebSocketTransport } = wst;
 import { HallRoom } from "./rooms/HallRoom";
-import { SIDE_HALLS } from "./shared";
+import { SIDE_HALLS, BUILD_VERSION } from "./shared";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = Number(process.env.PORT || 2567);
@@ -22,8 +22,21 @@ app.get("/health", (_req, res) => {
   res.json({
     ok: true,
     name: "静心寺",
+    version: BUILD_VERSION,
     rooms: ["courtyard", "main_hall", ...SIDE_HALLS.map((h) => h.room)],
     incense: "memory-only, 10 minutes per stick, no persistence",
+  });
+});
+
+/** Current build id. no-cache so a running client can detect a new deploy. */
+app.get("/version", (_req, res) => {
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.json({
+    ok: true,
+    name: "静心寺",
+    version: BUILD_VERSION,
   });
 });
 
@@ -48,7 +61,11 @@ app.use(express.static(dist, {
   fallthrough: true,
   index: false,
   setHeaders(res, filePath) {
-    if (filePath.includes(`${path.sep}assets${path.sep}`)) {
+    if (path.basename(filePath) === "index.html") {
+      res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+      res.setHeader("Pragma", "no-cache");
+      res.setHeader("Expires", "0");
+    } else if (filePath.includes(`${path.sep}assets${path.sep}`)) {
       res.setHeader("Cache-Control", "public, max-age=31536000, immutable");
     } else if (/\.(glb|gltf|png|webp|jpe?g|ogg|m4a|mp3|woff2)$/i.test(filePath)) {
       res.setHeader("Cache-Control", "public, max-age=604800");
@@ -60,6 +77,9 @@ app.get("*", (req, res, next) => {
   if (req.path.startsWith("/matchmake") || req.path.startsWith("/colyseus")) {
     return next();
   }
+  res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
   res.sendFile(path.join(dist, "index.html"), (err) => {
     if (err) next();
   });
