@@ -156,7 +156,8 @@ async function main() {
     await walkTo(y1, INCENSE_BURNER.x, INCENSE_BURNER.z - 1.0);
     const before = y2.state.incenses.size;
     y1.send("incense");
-    await waitFor(() => y2.state.incenses.size > before, 3000, "incense");
+    // Ritual bows then plants (~4.4 s); allow a generous window.
+    await waitFor(() => y2.state.incenses.size > before, 9000, "incense after ritual");
     const stick = [...y2.state.incenses.values()][0] as { litAt: number };
     const fresh = stick && Math.abs(Date.now() - stick.litAt) < 5000;
     results.push({ name: "incense sync", ok: fresh, detail: `incenses=${y2.state.incenses.size} litAtΔ=${stick ? Date.now()-stick.litAt : "?"}ms` });

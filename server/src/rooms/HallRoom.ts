@@ -1,7 +1,7 @@
 import colyseus from "colyseus";
 import type { Client } from "colyseus";
 const { Room, ServerError } = colyseus;
-import { HallState, Player, Incense } from "./schema";
+import { HallState, Player, Incense, BurnerQueue } from "./schema";
 import { validateName } from "../profanity";
 import {
   CUSHION_COUNT,
@@ -12,17 +12,27 @@ import {
   SIT_RANGE,
   type HallId,
   BURNERS,
+  BUILD_VERSION,
+  QUEUE_LEAVE_DISTANCE,
+  RITUAL_PHASE,
   clampToWalkable,
   cushionPosition,
   dist2,
   hallByRoom,
   interiorSpawn,
   nearestBurner,
+  inQueueApproach,
+  nearestQueueBurner,
+  queueSlotPose,
+  ritualFinished,
+  ritualPhaseAt,
+  ritualPlantAtMs,
 } from "../shared";
 
 const LOOK_COUNT = 8;
 const MOVE_GRACE = 0.4;
 const INCENSE_COOLDOWN_MS = 2000;
+const ARRIVE_RANGE = 0.55;
 
 function hallIdOf(roomName: string): HallId {
   if (roomName === "courtyard") return "courtyard";
@@ -36,6 +46,9 @@ export class HallRoom extends Room<HallState> {
   patchRate = 50;
   private hallId: HallId = "courtyard";
   private lastIncense = new Map<string, number>();
+  /** Clicked 上香 as the front of an empty queue: auto-start on arrival. */
+  private wantOffer = new Map<string, boolean>();
+  private ritualPlanted = new Set<string>();
 
   onCreate() {
     this.hallId = hallIdOf(this.roomName);
@@ -44,18 +57,31 @@ export class HallRoom extends Room<HallState> {
     // no ghost monk is left sitting after a tab close or a crashed test client.
     const state = new HallState();
     state.hallId = this.hallId;
+    state.buildVersion = BUILD_VERSION;
     this.setState(state);
     if (this.hallId !== "courtyard") {
       for (let i = 0; i < CUSHION_COUNT; i++) this.state.cushions.push("");
+    } else {
+      for (const b of BURNERS) {
+        const q = new BurnerQueue();
+        q.burnerId = b.id;
+        this.state.queues.set(b.id, q);
+      }
     }
 
     this.onMessage("move", (client, data) => this.handleMove(client, data));
     this.onMessage("sit", (client, data) => this.handleSit(client, data));
     this.onMessage("stand", (client) => this.handleStand(client));
     this.onMessage("incense", (client, data) => this.handleIncense(client, data));
+    this.onMessage("queue_join", (client, data) => this.handleQueueJoin(client, data, false));
+    this.onMessage("queue_leave", (client) => this.leaveQueue(client.sessionId));
     this.onMessage("debug_seed_incense", (client, data) => this.handleSeed(client, data));
+    this.onMessage("debug_teleport", (client, data) => this.handleDebugTeleport(client, data));
 
-    this.setSimulationInterval(() => this.expireIncense(), 500);
+    this.setSimulationInterval(() => {
+      this.expireIncense();
+      this.tickQueues();
+    }, 100);
   }
 
   onJoin(client: Client, options: { name?: unknown; look?: unknown; x?: unknown; z?: unknown; rotY?: unknown }) {
@@ -104,6 +130,7 @@ export class HallRoom extends Room<HallState> {
     p.sitting = false;
     p.cushionId = -1;
     this.state.players.set(client.sessionId, p);
+    client.send("hello", { version: BUILD_VERSION });
   }
 
   onLeave(client: Client) {
@@ -112,6 +139,7 @@ export class HallRoom extends Room<HallState> {
       if (p.cushionId >= 0 && this.state.cushions[p.cushionId] === client.sessionId) {
         this.state.cushions[p.cushionId] = "";
       }
+      this.leaveQueue(client.sessionId);
       this.state.players.delete(client.sessionId);
     }
     this.lastIncense.delete(client.sessionId);
@@ -120,6 +148,17 @@ export class HallRoom extends Room<HallState> {
   private handleMove(client: Client, data: { x?: unknown; z?: unknown; rotY?: unknown }) {
     const p = this.state.players.get(client.sessionId);
     if (!p || p.sitting) return;
+    // Ritual locks the monk in place (client also ignores input).
+    if (p.ritualPhase > 0 && p.ritualPhase < RITUAL_PHASE.DONE) {
+      const burner = BURNERS.find((b) => b.id === p.queueBurner);
+      if (burner) {
+        const pose = queueSlotPose(burner, 0);
+        p.x = pose.x;
+        p.z = pose.z;
+        p.rotY = pose.rotY;
+      }
+      return;
+    }
     const x = Number(data?.x);
     const z = Number(data?.z);
     const rotY = Number(data?.rotY);
@@ -138,6 +177,17 @@ export class HallRoom extends Room<HallState> {
     p.x = c.x;
     p.z = c.z;
     p.rotY = rotY;
+
+    if (p.queueSlot >= 0 && p.queueBurner) {
+      const burner = BURNERS.find((b) => b.id === p.queueBurner);
+      if (burner) {
+        const pose = queueSlotPose(burner, p.queueSlot);
+        if (dist2(p.x, p.z, pose.x, pose.z) > QUEUE_LEAVE_DISTANCE * QUEUE_LEAVE_DISTANCE) {
+          this.leaveQueue(client.sessionId);
+          client.send("notice", { text: "已离开上香队列" });
+        }
+      }
+    }
   }
 
   private handleSit(client: Client, data: { cushionId?: unknown }) {
@@ -186,6 +236,11 @@ export class HallRoom extends Room<HallState> {
     client.send("stand_ok", {});
   }
 
+  /**
+   * 上香 button. Near a burner and not in a queue → join (auto-start ritual
+   * once at the offering spot if you joined as the front). Already at the
+   * front → start the ritual. Waiting behind others → a quiet reminder.
+   */
   private handleIncense(client: Client, data: { burnerId?: unknown } | undefined) {
     const p = this.state.players.get(client.sessionId);
     if (!p) return;
@@ -193,25 +248,222 @@ export class HallRoom extends Room<HallState> {
       client.send("notice", { text: "打坐时请先起身，再去上香" });
       return;
     }
-    let burner = nearestBurner(p.x, p.z, this.hallId);
+    if (p.ritualPhase > 0 && p.ritualPhase < RITUAL_PHASE.DONE) return;
+
+    if (p.queueSlot === 0 && p.queueBurner) {
+      const burner = BURNERS.find((b) => b.id === p.queueBurner);
+      if (burner) this.tryStartRitual(client.sessionId, burner, true);
+      return;
+    }
+    if (p.queueSlot > 0) {
+      client.send("notice", { text: `请排队等候，前面还有 ${p.queueSlot} 位` });
+      return;
+    }
+    this.handleQueueJoin(client, data, true);
+  }
+
+  private handleQueueJoin(
+    client: Client,
+    data: { burnerId?: unknown } | undefined,
+    offer: boolean,
+  ) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p) return;
+    if (this.hallId !== "courtyard") {
+      client.send("notice", { text: "请在殿门口的香炉上香" });
+      return;
+    }
+    if (p.sitting) {
+      client.send("notice", { text: "打坐时请先起身，再去上香" });
+      return;
+    }
+    if (p.ritualPhase > 0 && p.ritualPhase < RITUAL_PHASE.DONE) return;
+
+    const lineupLen = (id: string) => this.state.queues.get(id)?.lineup.length ?? 0;
+    let burner = nearestQueueBurner(p.x, p.z, this.hallId, lineupLen);
     const asked = typeof data?.burnerId === "string" ? data.burnerId : "";
-    if (!burner && asked) {
+    if (asked) {
       const b = BURNERS.find((x) => x.id === asked);
-      if (b && this.hallId === "courtyard" && dist2(p.x, p.z, b.x, b.z) <= b.radius * b.radius) burner = b;
+      if (b && inQueueApproach(p.x, p.z, b, lineupLen(b.id))) burner = b;
     }
     if (!burner) {
       client.send("notice", { text: "请走近香炉再上香" });
       return;
     }
-    const now = Date.now();
-    const last = this.lastIncense.get(client.sessionId) ?? 0;
-    if (now - last < INCENSE_COOLDOWN_MS) {
-      client.send("notice", { text: "心诚则灵，稍候再上" });
+
+    // Already in this queue: just report the slot.
+    if (p.queueBurner === burner.id && p.queueSlot >= 0) {
+      client.send("queue_ok", { burnerId: burner.id, slot: p.queueSlot, ahead: p.queueSlot });
+      if (offer && p.queueSlot === 0) this.tryStartRitual(client.sessionId, burner, true);
       return;
     }
-    this.lastIncense.set(client.sessionId, now);
-    this.addStick(burner.id, burner.x, burner.z, p.name, now);
-    this.broadcast("notice", { text: `${p.name} 上了一炷香` });
+
+    if (p.queueBurner) this.leaveQueue(client.sessionId);
+
+    const q = this.state.queues.get(burner.id);
+    if (!q) return;
+    q.lineup.push(client.sessionId);
+    this.reassign(q);
+    const slot = q.lineup.indexOf(client.sessionId);
+    if (offer && slot === 0) this.wantOffer.set(client.sessionId, true);
+    client.send("queue_ok", { burnerId: burner.id, slot, ahead: slot });
+  }
+
+  private tryStartRitual(sid: string, burner: ReturnType<typeof nearestBurner> & object, snap: boolean) {
+    if (!burner) return;
+    const p = this.state.players.get(sid);
+    const q = this.state.queues.get(burner.id);
+    if (!p || !q) return;
+    if (q.lineup[0] !== sid) return;
+    if (q.ritualSid && q.ritualSid !== sid) return;
+    if (p.ritualPhase > 0 && p.ritualPhase < RITUAL_PHASE.DONE) return;
+
+    const now = Date.now();
+    const last = this.lastIncense.get(sid) ?? 0;
+    if (now - last < INCENSE_COOLDOWN_MS) {
+      const client = this.clients.find((c) => c.sessionId === sid);
+      client?.send("notice", { text: "心诚则灵，稍候再上" });
+      return;
+    }
+
+    const pose = queueSlotPose(burner, 0);
+    if (!snap && dist2(p.x, p.z, pose.x, pose.z) > ARRIVE_RANGE * ARRIVE_RANGE) {
+      this.wantOffer.set(sid, true);
+      p.x = pose.x;
+      p.z = pose.z;
+      p.rotY = pose.rotY;
+      return;
+    }
+    p.x = pose.x;
+    p.z = pose.z;
+    p.rotY = pose.rotY;
+    p.ritualPhase = RITUAL_PHASE.RAISE;
+    p.ritualStartedAt = now;
+    q.ritualSid = sid;
+    this.wantOffer.delete(sid);
+    this.ritualPlanted.delete(sid);
+    this.lastIncense.set(sid, now);
+    this.broadcast("ritual_start", {
+      sessionId: sid,
+      burnerId: burner.id,
+      startedAt: now,
+    });
+  }
+
+  private leaveQueue(sid: string) {
+    const p = this.state.players.get(sid);
+    const burnerId = p?.queueBurner ?? "";
+    if (p) {
+      p.queueBurner = "";
+      p.queueSlot = -1;
+      p.ritualPhase = 0;
+      p.ritualStartedAt = 0;
+    }
+    this.wantOffer.delete(sid);
+    this.ritualPlanted.delete(sid);
+    this.state.queues.forEach((q) => {
+      if (q.ritualSid === sid) q.ritualSid = "";
+      const idx = q.lineup.indexOf(sid);
+      if (idx >= 0) {
+        q.lineup.splice(idx, 1);
+        this.reassign(q);
+      }
+    });
+    void burnerId;
+  }
+
+  private reassign(q: BurnerQueue) {
+    const burner = BURNERS.find((b) => b.id === q.burnerId);
+    if (!burner) return;
+    // Drop ids that have already left the room.
+    for (let i = q.lineup.length - 1; i >= 0; i--) {
+      const sid: string | undefined = q.lineup[i];
+      if (!sid || !this.state.players.has(sid)) q.lineup.splice(i, 1);
+    }
+    q.lineup.forEach((sid, i) => {
+      const p = this.state.players.get(sid);
+      if (!p) return;
+      p.queueBurner = q.burnerId;
+      p.queueSlot = i;
+      if (p.ritualPhase === 0) {
+        const pose = queueSlotPose(burner, i);
+        p.x = pose.x;
+        p.z = pose.z;
+        p.rotY = pose.rotY;
+      }
+    });
+  }
+
+  private tickQueues() {
+    if (this.hallId !== "courtyard") return;
+    const now = Date.now();
+    this.state.queues.forEach((q) => {
+      const burner = BURNERS.find((b) => b.id === q.burnerId);
+      if (!burner) return;
+
+      // Auto-start ritual for a front member who already asked to offer and has arrived.
+      if (!q.ritualSid && q.lineup.length > 0) {
+        const front: string | undefined = q.lineup[0];
+        if (front && this.wantOffer.get(front)) {
+          const p = this.state.players.get(front);
+          if (p) {
+            const pose = queueSlotPose(burner, 0);
+            if (dist2(p.x, p.z, pose.x, pose.z) <= ARRIVE_RANGE * ARRIVE_RANGE) {
+              this.tryStartRitual(front, burner, true);
+            } else {
+              // Keep them on the offering spot so they arrive even if the client is idle.
+              p.x = pose.x;
+              p.z = pose.z;
+              p.rotY = pose.rotY;
+            }
+          }
+        }
+      }
+
+      if (!q.ritualSid) return;
+      const p = this.state.players.get(q.ritualSid);
+      if (!p) {
+        q.ritualSid = "";
+        this.reassign(q);
+        return;
+      }
+      const elapsed = now - p.ritualStartedAt;
+      const phase = ritualPhaseAt(elapsed);
+      p.ritualPhase = phase;
+      const pose = queueSlotPose(burner, 0);
+      p.x = pose.x;
+      p.z = pose.z;
+      p.rotY = pose.rotY;
+
+      if (elapsed >= ritualPlantAtMs() && !this.ritualPlanted.has(q.ritualSid)) {
+        this.ritualPlanted.add(q.ritualSid);
+        this.addStick(burner.id, burner.x, burner.z, p.name, now);
+        this.broadcast("notice", { text: `${p.name} 上了一炷香` });
+      }
+
+      if (ritualFinished(elapsed)) {
+        const sid = q.ritualSid;
+        const hallId = burner.hallId;
+        const client = this.clients.find((c) => c.sessionId === sid);
+        this.leaveQueue(sid);
+        client?.send("ritual_done", { hallId });
+      }
+    });
+  }
+
+  /** Preview/screenshot helper: snap a player, bypassing the move-speed cap. */
+  private handleDebugTeleport(client: Client, data: { x?: unknown; z?: unknown; rotY?: unknown } | undefined) {
+    const p = this.state.players.get(client.sessionId);
+    if (!p) return;
+    if (p.ritualPhase > 0 && p.ritualPhase < RITUAL_PHASE.DONE) return;
+    const x = Number(data?.x);
+    const z = Number(data?.z);
+    const rotY = Number(data?.rotY);
+    if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+    const c = clampToWalkable(x, z, this.hallId);
+    p.x = c.x;
+    p.z = c.z;
+    if (Number.isFinite(rotY)) p.rotY = rotY;
   }
 
   /** Preview/screenshot helper: plant many sticks on a burner with staggered ages. No countdown is shown. */

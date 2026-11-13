@@ -12,10 +12,15 @@ import { Controls } from "./controls";
 import { TempleAudio } from "./audio";
 import {
   CUSHION_COUNT, PLAYER_RADIUS, SIT_RANGE,
-  type HallId, ALL_HALLS, MAIN_HALL, SIDE_HALLS,
-  clampToWalkable, cushionPosition, dist2, nearestBurner,
+  type HallId, ALL_HALLS, MAIN_HALL, SIDE_HALLS, BURNERS,
+  clampToWalkable, cushionPosition, dist2, nearestBurner, nearestQueueBurner,
   courtyardDoorHit, interiorExitHit, courtyardSpawnFrom, interiorSpawn, hallById, hallByRoom,
+  queueSlotPose, RITUAL_PHASE,
 } from "../../server/src/shared";
+import {
+  bindUpdateBanner, clientBuildVersion, hideUpdateBanner, reconnectDelayMs,
+  shouldOfferUpdate, showUpdateBanner, UPDATE_CHECK_INTERVAL_MS,
+} from "./net/update";
 
 export function serverUrl(): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
@@ -28,11 +33,14 @@ interface Remote {
   tag: CSS2DObject;
   tx: number; tz: number; trot: number;
   sitting: boolean; moving: boolean;
+  ritualPhase: number; ritualStartedAt: number;
 }
 
 interface PlayerView {
   name: string; x: number; z: number; rotY: number;
   sitting: boolean; cushionId: number; look: number;
+  queueBurner?: string; queueSlot?: number;
+  ritualPhase?: number; ritualStartedAt?: number;
 }
 
 export class Game {
@@ -74,6 +82,19 @@ export class Game {
   private leaving = false;
   private doorCooldown = 0;
   private hallId: HallId = "courtyard";
+  private myQueueBurner = "";
+  private myQueueSlot = -1;
+  private myRitualPhase = 0;
+  private myRitualStartedAt = 0;
+  private ritualEnterPending = false;
+  private suppressRitualEnter = false;
+  private lastRoomName = "courtyard";
+  private lastPose = { x: 0, z: 0, rotY: 0 };
+  private reconnectAttempt = 0;
+  private reconnectTimer = 0;
+  private reconnecting = false;
+  private updateTimer = 0;
+  private onVis: (() => void) | null = null;
   private hallCache = new Map<HallId, HallObjects>();
   private warming: HallId | null = null;
   private enterMarks: Record<string, number> = {};
@@ -138,6 +159,7 @@ export class Game {
     this.running = true;
     this.clock.getDelta();
     requestAnimationFrame(this.loop);
+    this.startUpdateWatch();
 
     const joy = document.getElementById("joystick")!;
     this.controls.attachJoystick(
@@ -255,6 +277,9 @@ export class Game {
     this.clearRemotes();
     this.room = newRoom;
     this.sessionId = newRoom.sessionId;
+    this.lastRoomName = roomName;
+    this.reconnectAttempt = 0;
+    this.reconnecting = false;
     this.bindRoom();
   }
 
@@ -399,6 +424,8 @@ export class Game {
       this.remotes.set(id, {
         monk, group, tag, tx: p.x, tz: p.z, trot: p.rotY,
         sitting: p.sitting, moving: false,
+        ritualPhase: p.ritualPhase ?? 0,
+        ritualStartedAt: p.ritualStartedAt ?? 0,
       });
     };
 
@@ -427,20 +454,39 @@ export class Game {
       this.sitting = false;
       this.audio.setSitting(false);
     });
+    this.room.onMessage("hello", (m: { version?: string }) => {
+      if (m?.version) this.onServerVersion(m.version);
+    });
+    this.room.onMessage("ritual_start", (m: { sessionId?: string; startedAt?: number }) => {
+      if (m?.sessionId === this.sessionId && this.localMonk) {
+        this.myRitualPhase = 1;
+        this.myRitualStartedAt = m.startedAt ?? Date.now();
+        this.localMonk.setRitual(1, this.myRitualStartedAt);
+        this.controls.dest = null;
+      }
+    });
+    this.room.onMessage("ritual_done", (m: { hallId?: HallId }) => {
+      void this.afterRitualEnter(m?.hallId);
+    });
     this.room.onError((_c, msg) => this.toast(msg || "连接出现问题"));
     this.room.onLeave((code) => {
-      if (!this.leaving && code !== 4000) this.toast("与寺中的连接已中断");
+      if (this.leaving) return;
+      if (code === 4000) return;
+      this.toast("连接中断，正在重连…");
+      this.scheduleReconnect();
     });
     this.onState();
   }
 
   private onState() {
     const st = this.room?.state as {
+      buildVersion?: string;
       players: Map<string, PlayerView>;
       cushions: string[];
       incenses: Map<string, { id: string; x: number; z: number; litAt: number; burnerId?: string }>;
     };
     if (!st) return;
+    if (st.buildVersion) this.onServerVersion(st.buildVersion);
     document.getElementById("online")!.textContent = `在线 ${st.players?.size ?? 0}`;
     const inc: { id: string; x: number; z: number; litAt: number; burnerId?: string }[] = [];
     st.incenses?.forEach((v) => inc.push(v));
@@ -450,11 +496,21 @@ export class Game {
         setCushionOccupied(this.hall.cushions, i, !!st.cushions[i]);
       }
     }
+    const me = st.players?.get(this.sessionId);
+    if (me) {
+      this.myQueueBurner = me.queueBurner ?? "";
+      this.myQueueSlot = me.queueSlot ?? -1;
+      this.myRitualPhase = me.ritualPhase ?? 0;
+      this.myRitualStartedAt = me.ritualStartedAt ?? 0;
+      if (this.localMonk) this.localMonk.setRitual(this.myRitualPhase, this.myRitualStartedAt);
+    }
     st.players?.forEach((p, id) => {
       if (id === this.sessionId) return;
       const r = this.remotes.get(id);
       if (!r) return;
       r.tx = p.x; r.tz = p.z; r.trot = p.rotY; r.sitting = p.sitting;
+      r.ritualPhase = p.ritualPhase ?? 0;
+      r.ritualStartedAt = p.ritualStartedAt ?? 0;
     });
   }
 
@@ -462,7 +518,7 @@ export class Game {
     document.getElementById("btn-muyu")!.addEventListener("click", () => this.muyuPanel.strike());
     document.getElementById("btn-sit")!.addEventListener("click", () => this.toggleSit());
     document.getElementById("btn-incense")!.addEventListener("click", () => {
-      this.room?.send("incense", { burnerId: this.nearBurnerId });
+      this.clickIncense();
     });
     document.getElementById("btn-enter")?.addEventListener("click", () => this.tryEnterDoor());
     document.getElementById("mute-btn")!.addEventListener("click", () => {
@@ -542,6 +598,7 @@ export class Game {
 
   private tryTap(e: PointerEvent) {
     if (this.sitting) return;
+    if (this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
     this.ndc.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     this.ndc.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
@@ -642,6 +699,11 @@ export class Game {
 
   private updateAutoDoor(_dt: number) {
     if (this.sitting || this.leaving || this.doorCooldown > 0) return;
+    // Queue is only for offering incense; walking into a door without
+    // joining a queue still enters the hall. While queued or ritually
+    // locked, do not auto-enter (after the ritual we call tryEnterDoor directly).
+    if (this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE) return;
+    if (this.myQueueSlot >= 0) return;
     const x = this.localGroup.position.x;
     const z = this.localGroup.position.z;
     if (this.hallId === "courtyard") {
@@ -659,7 +721,20 @@ export class Game {
   private updateLocal(dt: number) {
     if (!this.localMonk) return;
     let moving = false;
-    if (!this.sitting) {
+    const ritualLock = this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE;
+    if (ritualLock) {
+      this.controls.dest = null;
+      const burner = BURNERS.find((b) => b.id === this.myQueueBurner);
+      if (burner) {
+        const pose = queueSlotPose(burner, 0);
+        const k = 1 - Math.exp(-10 * dt);
+        this.localGroup.position.x += (pose.x - this.localGroup.position.x) * k;
+        this.localGroup.position.z += (pose.z - this.localGroup.position.z) * k;
+        this.localGroup.rotation.y = lerpAngle(this.localGroup.rotation.y, pose.rotY, k);
+      }
+    } else if (this.myQueueSlot >= 0 && this.myQueueBurner) {
+      moving = this.stepQueuePosition(dt);
+    } else if (!this.sitting) {
       const intent = this.controls.moveIntent();
       if (intent.turn !== 0) {
         this.localGroup.rotation.y += intent.turn * 2.15 * dt;
@@ -701,8 +776,13 @@ export class Game {
     this.localMonk.update(dt, moving, this.sitting);
     if (this.localTag) this.localTag.position.y = this.localMonk.crownY();
 
+    this.lastPose = {
+      x: this.localGroup.position.x,
+      z: this.localGroup.position.z,
+      rotY: this.localGroup.rotation.y,
+    };
     this.sendAcc += dt;
-    if (this.sendAcc >= 1 / 15 && this.room && !this.leaving) {
+    if (this.sendAcc >= 1 / 15 && this.room && !this.leaving && !ritualLock) {
       this.sendAcc = 0;
       this.room.send("move", {
         x: this.localGroup.position.x,
@@ -712,6 +792,64 @@ export class Game {
     }
   }
 
+  /** Auto-walk to the assigned queue slot; user movement away from the line leaves the queue. */
+  private stepQueuePosition(dt: number): boolean {
+    const burner = BURNERS.find((b) => b.id === this.myQueueBurner);
+    if (!burner) return false;
+    const pose = queueSlotPose(burner, this.myQueueSlot);
+    const intent = this.controls.moveIntent();
+    const userLeave = intent.walking || !!this.controls.dest;
+    if (userLeave) {
+      // Let them walk; the server dequeues once they are far from the slot.
+      let vx = 0, vz = 0;
+      if (intent.forward !== 0) {
+        const face = this.localGroup.rotation.y;
+        vx += Math.sin(face) * intent.forward;
+        vz += Math.cos(face) * intent.forward;
+      }
+      if (intent.turn !== 0) this.localGroup.rotation.y += intent.turn * 2.15 * dt;
+      if (this.controls.dest) {
+        const dx = this.controls.dest.x - this.localGroup.position.x;
+        const dz = this.controls.dest.z - this.localGroup.position.z;
+        const d = Math.hypot(dx, dz);
+        if (d < 0.25) this.controls.dest = null;
+        else { vx = dx / d; vz = dz / d; }
+      }
+      const mag = Math.hypot(vx, vz);
+      if (mag > 0.05) {
+        const step = this.speed * dt;
+        const rawX = this.localGroup.position.x + (vx / mag) * step;
+        const rawZ = this.localGroup.position.z + (vz / mag) * step;
+        const resolved = resolveMove(
+          this.localGroup.position.x, this.localGroup.position.z,
+          rawX, rawZ, this.hall.obstacles, PLAYER_RADIUS,
+        );
+        const c = clampToWalkable(resolved.x, resolved.z, this.hallId);
+        this.localGroup.position.set(c.x, 0, c.z);
+        return true;
+      }
+      return false;
+    }
+    const dx = pose.x - this.localGroup.position.x;
+    const dz = pose.z - this.localGroup.position.z;
+    const d = Math.hypot(dx, dz);
+    this.localGroup.rotation.y = lerpAngle(this.localGroup.rotation.y, pose.rotY, Math.min(1, dt * 8));
+    if (d < 0.05) {
+      this.localGroup.position.set(pose.x, 0, pose.z);
+      return false;
+    }
+    const step = Math.min(d, this.speed * dt);
+    const rawX = this.localGroup.position.x + (dx / d) * step;
+    const rawZ = this.localGroup.position.z + (dz / d) * step;
+    const resolved = resolveMove(
+      this.localGroup.position.x, this.localGroup.position.z,
+      rawX, rawZ, this.hall.obstacles, PLAYER_RADIUS,
+    );
+    const c = clampToWalkable(resolved.x, resolved.z, this.hallId);
+    this.localGroup.position.set(c.x, 0, c.z);
+    return true;
+  }
+
   private updateRemotes(dt: number) {
     this.remotes.forEach((r) => {
       const k = 1 - Math.exp(-12 * dt);
@@ -719,7 +857,8 @@ export class Game {
       r.group.position.z += (r.tz - r.group.position.z) * k;
       r.group.rotation.y = lerpAngle(r.group.rotation.y, r.trot, k);
       const dist = Math.hypot(r.tx - r.group.position.x, r.tz - r.group.position.z);
-      r.moving = dist > 0.04 && !r.sitting;
+      r.moving = dist > 0.04 && !r.sitting && r.ritualPhase === 0;
+      r.monk.setRitual(r.ritualPhase, r.ritualStartedAt);
       r.monk.update(dt, r.moving, r.sitting);
       r.tag.position.y = r.monk.crownY();
     });
@@ -751,7 +890,11 @@ export class Game {
     const x = this.localGroup.position.x;
     const z = this.localGroup.position.z;
 
-    const b = nearestBurner(x, z, this.hallId);
+    const lineupLen = (id: string) => {
+      const st = this.room?.state as { queues?: Map<string, { lineup?: string[] }> } | undefined;
+      return st?.queues?.get(id)?.lineup?.length ?? 0;
+    };
+    const b = nearestQueueBurner(x, z, this.hallId, lineupLen) ?? nearestBurner(x, z, this.hallId);
     this.nearBurnerId = b?.id ?? null;
 
     this.nearCushion = -1;
@@ -766,11 +909,21 @@ export class Game {
       }
     }
 
-    // Hint only — no incense countdown, ever.
+    // Hint only — no incense countdown, ever. No payment or merit language.
     const hint = document.getElementById("near-hint")!;
-    if (this.nearBurnerId) {
+    const ritualLock = this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE;
+    if (ritualLock) {
       hint.hidden = false;
-      hint.textContent = "走近香炉，可上香";
+      hint.textContent = "上香中";
+    } else if (this.myQueueSlot === 0) {
+      hint.hidden = false;
+      hint.textContent = "轮到你了";
+    } else if (this.myQueueSlot > 0) {
+      hint.hidden = false;
+      hint.textContent = `排队中·前面还有${this.myQueueSlot}位`;
+    } else if (this.nearBurnerId) {
+      hint.hidden = false;
+      hint.textContent = "走近香炉，可上香；上香需排队";
     } else if (this.nearCushion >= 0) {
       hint.hidden = false;
       hint.textContent = "走近蒲团，可打坐";
@@ -782,12 +935,110 @@ export class Game {
     }
 
     const inc = document.getElementById("btn-incense") as HTMLButtonElement;
-    inc.disabled = this.sitting || !this.nearBurnerId;
+    if (ritualLock) {
+      inc.disabled = true;
+      inc.textContent = "上香中";
+    } else if (this.myQueueSlot > 0) {
+      inc.disabled = true;
+      inc.textContent = "排队中";
+    } else if (this.myQueueSlot === 0) {
+      inc.disabled = false;
+      inc.textContent = "上香";
+    } else {
+      inc.disabled = this.sitting || !this.nearBurnerId;
+      inc.textContent = "上香";
+    }
     inc.classList.toggle("ready", !inc.disabled);
     const sit = document.getElementById("btn-sit") as HTMLButtonElement;
     sit.disabled = this.hallId === "courtyard" ? !this.sitting : (this.sitting ? false : this.nearCushion < 0);
     sit.textContent = this.sitting ? "起身" : "打坐";
     sit.classList.toggle("ready", !sit.disabled);
+  }
+
+  private clickIncense() {
+    if (!this.room) return;
+    if (this.myRitualPhase > 0 && this.myRitualPhase < RITUAL_PHASE.DONE) return;
+    this.room.send("incense", { burnerId: this.nearBurnerId || this.myQueueBurner || undefined });
+  }
+
+  private async afterRitualEnter(hallId?: HallId) {
+    if (this.suppressRitualEnter) return;
+    if (this.ritualEnterPending || this.leaving) return;
+    const h = hallId && hallId !== "courtyard" ? hallById(hallId) : undefined;
+    if (!h) return;
+    this.ritualEnterPending = true;
+    this.myRitualPhase = 0;
+    this.myQueueSlot = -1;
+    this.myQueueBurner = "";
+    if (this.localMonk) this.localMonk.setRitual(0, 0);
+    this.nearDoor = { name: h.name, room: h.room, hallId: h.id };
+    this.doorCooldown = 0;
+    try {
+      await this.tryEnterDoor();
+    } finally {
+      this.ritualEnterPending = false;
+    }
+  }
+
+  private startUpdateWatch() {
+    bindUpdateBanner();
+    void this.checkForUpdate();
+    if (this.updateTimer) window.clearInterval(this.updateTimer);
+    this.updateTimer = window.setInterval(() => void this.checkForUpdate(), UPDATE_CHECK_INTERVAL_MS);
+    if (this.onVis) document.removeEventListener("visibilitychange", this.onVis);
+    this.onVis = () => {
+      if (document.visibilityState === "visible") void this.checkForUpdate();
+    };
+    document.addEventListener("visibilitychange", this.onVis);
+  }
+
+  private onServerVersion(version: string) {
+    if (shouldOfferUpdate(clientBuildVersion(), version)) showUpdateBanner();
+    else hideUpdateBanner();
+  }
+
+  private async checkForUpdate() {
+    try {
+      const r = await fetch("/version", { cache: "no-store" });
+      if (!r.ok) return;
+      const j = await r.json() as { version?: string };
+      if (j?.version) this.onServerVersion(j.version);
+    } catch {
+      /* offline: skip; reconnect path will try again */
+    }
+  }
+
+  private scheduleReconnect() {
+    if (this.leaving || this.reconnecting) return;
+    if (this.reconnectTimer) window.clearTimeout(this.reconnectTimer);
+    const delay = reconnectDelayMs(this.reconnectAttempt);
+    this.reconnectAttempt += 1;
+    this.reconnectTimer = window.setTimeout(() => void this.tryReconnect(), delay);
+  }
+
+  private async tryReconnect() {
+    if (this.leaving || !this.client) return;
+    this.reconnecting = true;
+    const roomName = this.lastRoomName || "courtyard";
+    const pose = this.lastPose;
+    try {
+      await this.connectRoom(roomName, {
+        name: this.myName,
+        look: this.myLook,
+        x: pose.x,
+        z: pose.z,
+        rotY: pose.rotY,
+      });
+      this.toast("已重新连上");
+      void this.checkForUpdate();
+    } catch (err) {
+      this.reconnecting = false;
+      const msg = String((err as Error)?.message ?? err);
+      // Name still held by a closing session — retry shortly.
+      if (this.reconnectAttempt < 12) this.scheduleReconnect();
+      else this.toast("与寺中的连接已中断，请刷新页面");
+      void msg;
+    }
   }
 
   private toast(text: string) {
@@ -814,6 +1065,11 @@ export class Game {
       holdWalk: (key: string | false) => void;
       joinHall: (id: string) => Promise<void>;
       seedIncense: (n?: number, burnerId?: string) => void;
+      joinIncenseQueue: (burnerId?: string, offer?: boolean) => void;
+      startIncenseRitual: () => void;
+      incenseQueue: () => { burnerId: string; slot: number; phase: number; ahead: number };
+      showUpdateBanner: (show?: boolean) => void;
+      suppressRitualEnter: (v?: boolean) => void;
       hallId: () => string;
       hallCached: (id: string) => boolean;
       enterTiming: () => Record<string, number>;
@@ -833,6 +1089,7 @@ export class Game {
       this.localGroup.position.set(c.x, 0, c.z);
       this.localGroup.rotation.y = rotY;
       this.controls.dest = null;
+      this.room?.send("debug_teleport", { x: c.x, z: c.z, rotY });
       this.room?.send("move", { x: c.x, z: c.z, rotY });
     };
     w.holdWalk = (key) => {
@@ -854,6 +1111,26 @@ export class Game {
     w.seedIncense = (n = 48, burnerId?: string) => {
       this.room?.send("debug_seed_incense", { count: n, burnerId });
     };
+    w.joinIncenseQueue = (burnerId?: string, offer = false) => {
+      const id = burnerId || this.nearBurnerId || "burner_main";
+      this.room?.send(offer ? "incense" : "queue_join", { burnerId: id });
+    };
+    w.startIncenseRitual = () => {
+      this.room?.send("incense", { burnerId: this.myQueueBurner || this.nearBurnerId });
+    };
+    w.incenseQueue = () => ({
+      burnerId: this.myQueueBurner,
+      slot: this.myQueueSlot,
+      phase: this.myRitualPhase,
+      ahead: Math.max(0, this.myQueueSlot),
+    });
+    w.showUpdateBanner = (show = true) => {
+      const toast = document.getElementById("toast");
+      if (toast && show) toast.hidden = true;
+      if (show) showUpdateBanner();
+      else hideUpdateBanner();
+    };
+    w.suppressRitualEnter = (v = true) => { this.suppressRitualEnter = !!v; };
     w.hallId = () => this.hallId;
     w.hallCached = (id) => this.hallCache.has(id as HallId);
     w.enterTiming = () => ({ ...this.enterMarks });
